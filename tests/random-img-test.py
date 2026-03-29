@@ -556,13 +556,13 @@ class ApiTester:
 
         # 1) 隐藏统计路由：仅做边界校验（状态、类型、非负值）。
         count_resp = self.request(RANDOM_IMG_COUNT_PATH)
-        self.assert_true(count_resp.status == 200, "GET hidden count route status")
+        self.assert_true(count_resp.status == 200, "GET count route status")
         self.assert_true(
             "application/json" in count_resp.headers.get("content-type", ""),
-            "GET hidden count route content-type",
+            "GET count route content-type",
             count_resp.headers.get("content-type", ""),
         )
-        count_data = self.parse_json(count_resp, "GET hidden count route json")
+        count_data = self.parse_json(count_resp, "GET count route json")
         if not isinstance(count_data, dict):
             return 1
 
@@ -642,7 +642,7 @@ class ApiTester:
             {"x": "1"},
             403,
             HIDDEN_ROUTE_QUERY_FORBIDDEN_MESSAGE_PART,
-            "hidden count route query forbidden",
+            "count route query forbidden",
         )
 
         # 2) 请求方法限制：非 GET 方法应返回 405。

@@ -132,9 +132,7 @@ const resolveHiddenPathRoute = async (url, request) => {
 
 		if (dynamicPath && pathname === dynamicPath) {
 			if (search) {
-				return jsonErrorResponse({ status: 403, message: "Forbidden: Routes do not accept query parameters" }, {
-					hint: "Call hidden routes with exact path and no query string",
-				});
+				return jsonErrorResponse({ status: 403, message: "Forbidden: Routes do not accept query parameters" });
 			}
 
 			const handler = await resolveHiddenHandler(pathKey);
@@ -142,9 +140,7 @@ const resolveHiddenPathRoute = async (url, request) => {
 				return await handler(request);
 			}
 
-			return jsonErrorResponse({ status: 500, message: "Internal Server Error: Route handler is not configured" }, {
-				hint: "Check hidden route key to handler naming convention",
-			});
+			return jsonErrorResponse({ status: 500, message: "Internal Server Error: Route handler is not configured" });
 		}
 	}
 
