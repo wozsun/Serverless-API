@@ -1,4 +1,23 @@
 #!/usr/bin/env python3
+"""
+随机图片 API (/random-img) 端到端集成测试。
+
+运行方式：
+    CONFIG='{"API_BASE_URL":"...","ASSET_BASE_URL":"...","RANDOM_IMG_COUNT_PATH":"..."}' python3 random-img-test.py
+
+测试流程：
+    1) 隐藏统计路由 — 校验响应结构与数据类型
+    2) 请求方法限制 — 非 GET 方法应返回 405
+    3) 错误参数覆盖 — 各类非法参数返回对应 4xx 错误
+    4) 大小写兼容 — 参数值大小写不敏感
+    5) 默认请求 — 无参数时 proxy 返回图片
+    6) 组合覆盖 — 基于统计数据遍历设备×亮度
+    7) 有效参数组合 — 各种合法 query 返回 200
+    8) 多主题/主题排除 — CSV 与重复参数形式
+    9) 全量组合 — 每个有图组合至少测一次 proxy + redirect
+    10) 方法模式行为 — proxy 与 redirect 语义断言
+    11) 稳定性抽样 — 多次随机请求验证一致性
+"""
 from __future__ import annotations
 
 import json
@@ -15,6 +34,12 @@ from dataclasses import dataclass
 from typing import Any
 
 
+# ===========================
+# 工具函数：环境变量与配置解析
+# ===========================
+
+
+# 读取必需的环境变量，缺失时抛出异常。
 def _required_env(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
@@ -50,21 +75,23 @@ SUPPORTED_BRIGHTNESS = {"dark", "light"}
 
 # 一次完整测试中必须覆盖到的错误类型。
 REQUIRED_ERROR_COVERAGE_KEYS = {
-    "INVALID_QUERY_PARAMS",
-    "INVALID_DEVICE",
-    "INVALID_BRIGHTNESS",
-    "INVALID_METHOD",
-    "INVALID_THEME",
+    "BAD_PARAMS",
+    "BAD_DEVICE",
+    "BAD_BRIGHTNESS",
+    "BAD_METHOD",
+    "BAD_THEME",
     "THEME_CONFLICT",
 }
 # 受数据分布影响、可能缺失的错误类型。
-OPTIONAL_ERROR_COVERAGE_KEYS = {"NO_IMAGES_FOR_COMBINATION", "NO_AVAILABLE_IMAGES"}
+OPTIONAL_ERROR_COVERAGE_KEYS = {"NO_COMBO_IMAGES", "NO_IMAGES"}
 
 
+# 确保 URL 以 / 结尾，用于拼接资源路径。
 def _normalize_asset_base_url(url: str) -> str:
     return url.rstrip("/") + "/"
 
 
+# 解析 CONFIG JSON 字符串为字典，格式异常时抛出。
 def _required_config(raw_config: str) -> dict[str, Any]:
     try:
         parsed = json.loads(raw_config)
@@ -75,6 +102,7 @@ def _required_config(raw_config: str) -> dict[str, Any]:
     return parsed
 
 
+# 从 CONFIG 字典中提取必需的字符串字段。
 def _required_config_str(config: dict[str, Any], key: str) -> str:
     value = config.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -96,6 +124,10 @@ def _mask_config_for_log(config_raw: str) -> str:
     except Exception:
         return "<CONFIG: invalid JSON>"
 
+
+# ===========================
+# 全局配置初始化
+# ===========================
 
 CONFIG_RAW = _required_env(CONFIG_ENV_NAME)
 CONFIG = _required_config(CONFIG_RAW)
@@ -124,6 +156,12 @@ SENSITIVE_LOG_TOKENS = sorted(
 REDIRECT_LOCATION_PATTERN = rf"^{re.escape(ASSET_BASE_URL)}(pc|mb)-(dark|light)/[a-z0-9_-]+/\d{{{IMAGE_FILENAME_DIGITS}}}\.webp$"
 
 
+# ===========================
+# 日志脱敏工具
+# ===========================
+
+
+# 将 URL 替换为占位符，避免日志泄露敏感地址。
 def _mask_url_for_log(url: str) -> str:
     parsed = urllib.parse.urlparse(url)
     if not parsed.scheme or not parsed.netloc:
@@ -131,6 +169,7 @@ def _mask_url_for_log(url: str) -> str:
     return "<redacted-url>"
 
 
+# 对文本中的 URL 和敏感 token 统一做脱敏替换。
 def _redact_urls_in_text(text: str, extra_tokens: list[str] | None = None) -> str:
     value = str(text)
 
@@ -149,11 +188,13 @@ def _redact_urls_in_text(text: str, extra_tokens: list[str] | None = None) -> st
     return re.sub(r"https?://[^\s'\"\]\[)>,]+", _replace, value)
 
 
+# 禁止自动跟随重定向的 handler，用于断言 302 响应本身。
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
 
+# HTTP 响应的结构化封装。
 @dataclass
 class HttpResult:
     status: int
@@ -165,6 +206,11 @@ class HttpResult:
         return self.body.decode("utf-8", errors="replace")
 
 
+# ===========================
+# 核心测试类
+# ===========================
+
+
 class ApiTester:
     def __init__(
         self, api_base_url: str, asset_base_url: str, timeout: float, random_runs: int
@@ -174,14 +220,14 @@ class ApiTester:
         self.timeout = timeout
         self.random_runs = random_runs
         self.error_coverage: dict[str, bool] = {
-            "INVALID_QUERY_PARAMS": False,
-            "INVALID_DEVICE": False,
-            "INVALID_BRIGHTNESS": False,
-            "INVALID_METHOD": False,
-            "INVALID_THEME": False,
+            "BAD_PARAMS": False,
+            "BAD_DEVICE": False,
+            "BAD_BRIGHTNESS": False,
+            "BAD_METHOD": False,
+            "BAD_THEME": False,
             "THEME_CONFLICT": False,
-            "NO_IMAGES_FOR_COMBINATION": False,
-            "NO_AVAILABLE_IMAGES": False,
+            "NO_COMBO_IMAGES": False,
+            "NO_IMAGES": False,
         }
         self.passed = 0
         self.failed = 0
@@ -201,205 +247,129 @@ class ApiTester:
                 merged.add(normalized)
         self.theme_tokens_for_log = sorted(merged, key=len, reverse=True)
 
+    # 对日志文本做脱敏处理（URL + 主题名等敏感 token）。
     def redact_for_log(self, text: str) -> str:
         return _redact_urls_in_text(text, extra_tokens=self.theme_tokens_for_log)
 
+    # 格式化重试次数后缀，非零时追加到断言标签中。
     def _format_retry_note(self, http_5xx_retries: int, network_retries: int) -> str:
         total_retries = http_5xx_retries + network_retries
         if total_retries <= 0:
             return ""
         return f" (retries={total_retries})"
 
-    def _url(self, path: str, query: dict[str, str] | None = None) -> str:
+    # 拼接完整请求 URL（路径 + query 参数）。支持 dict 或元组列表（用于重复 key）。
+    def _build_url(
+        self,
+        path: str,
+        query: dict[str, str] | list[tuple[str, str]] | None = None,
+    ) -> str:
         if not path.startswith("/"):
             path = "/" + path
         if not query:
             return f"{self.api_base_url}{path}"
         return f"{self.api_base_url}{path}?{urllib.parse.urlencode(query)}"
 
-    def _url_from_query_items(
-        self, path: str, query_items: list[tuple[str, str]]
-    ) -> str:
-        if not path.startswith("/"):
-            path = "/" + path
-        if not query_items:
-            return f"{self.api_base_url}{path}"
-        return f"{self.api_base_url}{path}?{urllib.parse.urlencode(query_items)}"
+    # 底层请求执行：负责网络重试、5xx 重试和结果结构化。
+    def _do_request(
+        self, url: str, method: str, follow_redirects: bool
+    ) -> HttpResult:
+        req = urllib.request.Request(url, method=method)
+        opener = self.normal_opener if follow_redirects else self.no_redirect_opener
 
+        http_5xx_retries = 0
+        network_retries = 0
+
+        while True:
+            try:
+                with opener.open(req, timeout=self.timeout) as resp:
+                    status = resp.getcode()
+                    headers = {k.lower(): v for k, v in resp.headers.items()}
+                    try:
+                        body = resp.read()
+                    except http.client.IncompleteRead as exc:
+                        partial = bytes(exc.partial or b"")
+                        if partial:
+                            body = partial
+                        elif network_retries < MAX_NETWORK_RETRIES:
+                            network_retries += 1
+                            time.sleep(RETRY_BACKOFF_BASE_SECONDS * network_retries)
+                            continue
+                        else:
+                            raise
+                    self._next_assert_retry_note = self._format_retry_note(
+                        http_5xx_retries, network_retries
+                    )
+                    return HttpResult(
+                        status=status,
+                        headers=headers,
+                        body=body,
+                    )
+            except urllib.error.HTTPError as exc:
+                if (
+                    RETRYABLE_STATUS_MIN <= exc.code <= RETRYABLE_STATUS_MAX
+                    and http_5xx_retries < MAX_HTTP_5XX_RETRIES
+                ):
+                    http_5xx_retries += 1
+                    time.sleep(RETRY_BACKOFF_BASE_SECONDS * http_5xx_retries)
+                    continue
+                try:
+                    error_body = exc.read()
+                except http.client.IncompleteRead as read_exc:
+                    error_body = bytes(read_exc.partial or b"")
+                self._next_assert_retry_note = self._format_retry_note(
+                    http_5xx_retries, network_retries
+                )
+                return HttpResult(
+                    status=exc.code,
+                    headers={k.lower(): v for k, v in exc.headers.items()},
+                    body=error_body,
+                )
+            except (
+                urllib.error.URLError,
+                socket.timeout,
+                TimeoutError,
+                ssl.SSLError,
+                http.client.IncompleteRead,
+                http.client.RemoteDisconnected,
+                ConnectionResetError,
+                OSError,
+            ) as exc:
+                if network_retries >= MAX_NETWORK_RETRIES:
+                    self._next_assert_retry_note = self._format_retry_note(
+                        http_5xx_retries, network_retries
+                    )
+                    return HttpResult(
+                        status=599,
+                        headers={},
+                        body=f"request failed after retries: {exc}".encode(
+                            "utf-8", errors="replace"
+                        ),
+                    )
+                network_retries += 1
+                time.sleep(RETRY_BACKOFF_BASE_SECONDS * network_retries)
+
+    # 统一请求入口（query 为 dict）。
     def request(
         self,
         path: str,
         query: dict[str, str] | None = None,
         follow_redirects: bool = True,
+        method: str = "GET",
     ) -> HttpResult:
-        # 统一请求入口：负责网络重试、5xx 重试和结果结构化。
-        url = self._url(path, query)
-        req = urllib.request.Request(url, method="GET")
-        opener = self.normal_opener if follow_redirects else self.no_redirect_opener
+        return self._do_request(self._build_url(path, query), method, follow_redirects)
 
-        http_5xx_retries = 0
-        network_retries = 0
-
-        while True:
-            try:
-                with opener.open(req, timeout=self.timeout) as resp:
-                    status = resp.getcode()
-                    headers = {k.lower(): v for k, v in resp.headers.items()}
-                    try:
-                        body = resp.read()
-                    except http.client.IncompleteRead as exc:
-                        partial = bytes(exc.partial or b"")
-                        if partial:
-                            body = partial
-                        elif network_retries < MAX_NETWORK_RETRIES:
-                            network_retries += 1
-                            time.sleep(RETRY_BACKOFF_BASE_SECONDS * network_retries)
-                            continue
-                        else:
-                            raise
-                    self._next_assert_retry_note = self._format_retry_note(
-                        http_5xx_retries, network_retries
-                    )
-                    return HttpResult(
-                        status=status,
-                        headers=headers,
-                        body=body,
-                    )
-            except urllib.error.HTTPError as exc:
-                if (
-                    RETRYABLE_STATUS_MIN <= exc.code <= RETRYABLE_STATUS_MAX
-                    and http_5xx_retries < MAX_HTTP_5XX_RETRIES
-                ):
-                    http_5xx_retries += 1
-                    time.sleep(RETRY_BACKOFF_BASE_SECONDS * http_5xx_retries)
-                    continue
-                try:
-                    error_body = exc.read()
-                except http.client.IncompleteRead as read_exc:
-                    error_body = bytes(read_exc.partial or b"")
-                self._next_assert_retry_note = self._format_retry_note(
-                    http_5xx_retries, network_retries
-                )
-                return HttpResult(
-                    status=exc.code,
-                    headers={k.lower(): v for k, v in exc.headers.items()},
-                    body=error_body,
-                )
-            except (
-                urllib.error.URLError,
-                socket.timeout,
-                TimeoutError,
-                ssl.SSLError,
-                http.client.IncompleteRead,
-                http.client.RemoteDisconnected,
-                ConnectionResetError,
-                OSError,
-            ) as exc:
-                if network_retries >= MAX_NETWORK_RETRIES:
-                    self._next_assert_retry_note = self._format_retry_note(
-                        http_5xx_retries, network_retries
-                    )
-                    return HttpResult(
-                        status=599,
-                        headers={},
-                        body=f"request failed after retries: {exc}".encode(
-                            "utf-8", errors="replace"
-                        ),
-                    )
-                network_retries += 1
-                time.sleep(RETRY_BACKOFF_BASE_SECONDS * network_retries)
-
-        return HttpResult(
-            status=599, headers={}, body=b"request failed: unexpected retry flow"
-        )
-
+    # 统一请求入口（query 为元组列表，支持重复 key 如 t=a&t=b）。
     def request_query_items(
         self,
         path: str,
         query_items: list[tuple[str, str]],
         follow_redirects: bool = True,
+        method: str = "GET",
     ) -> HttpResult:
-        # 支持重复 query key（如 t=a&t=b）
-        url = self._url_from_query_items(path, query_items)
-        req = urllib.request.Request(url, method="GET")
-        opener = self.normal_opener if follow_redirects else self.no_redirect_opener
+        return self._do_request(self._build_url(path, query_items), method, follow_redirects)
 
-        http_5xx_retries = 0
-        network_retries = 0
-
-        while True:
-            try:
-                with opener.open(req, timeout=self.timeout) as resp:
-                    status = resp.getcode()
-                    headers = {k.lower(): v for k, v in resp.headers.items()}
-                    try:
-                        body = resp.read()
-                    except http.client.IncompleteRead as exc:
-                        partial = bytes(exc.partial or b"")
-                        if partial:
-                            body = partial
-                        elif network_retries < MAX_NETWORK_RETRIES:
-                            network_retries += 1
-                            time.sleep(RETRY_BACKOFF_BASE_SECONDS * network_retries)
-                            continue
-                        else:
-                            raise
-                    self._next_assert_retry_note = self._format_retry_note(
-                        http_5xx_retries, network_retries
-                    )
-                    return HttpResult(
-                        status=status,
-                        headers=headers,
-                        body=body,
-                    )
-            except urllib.error.HTTPError as exc:
-                if (
-                    RETRYABLE_STATUS_MIN <= exc.code <= RETRYABLE_STATUS_MAX
-                    and http_5xx_retries < MAX_HTTP_5XX_RETRIES
-                ):
-                    http_5xx_retries += 1
-                    time.sleep(RETRY_BACKOFF_BASE_SECONDS * http_5xx_retries)
-                    continue
-                try:
-                    error_body = exc.read()
-                except http.client.IncompleteRead as read_exc:
-                    error_body = bytes(read_exc.partial or b"")
-                self._next_assert_retry_note = self._format_retry_note(
-                    http_5xx_retries, network_retries
-                )
-                return HttpResult(
-                    status=exc.code,
-                    headers={k.lower(): v for k, v in exc.headers.items()},
-                    body=error_body,
-                )
-            except (
-                urllib.error.URLError,
-                socket.timeout,
-                TimeoutError,
-                ssl.SSLError,
-                http.client.IncompleteRead,
-                http.client.RemoteDisconnected,
-                ConnectionResetError,
-                OSError,
-            ) as exc:
-                if network_retries >= MAX_NETWORK_RETRIES:
-                    self._next_assert_retry_note = self._format_retry_note(
-                        http_5xx_retries, network_retries
-                    )
-                    return HttpResult(
-                        status=599,
-                        headers={},
-                        body=f"request failed after retries: {exc}".encode(
-                            "utf-8", errors="replace"
-                        ),
-                    )
-                network_retries += 1
-                time.sleep(RETRY_BACKOFF_BASE_SECONDS * network_retries)
-
-        return HttpResult(
-            status=599, headers={}, body=b"request failed: unexpected retry flow"
-        )
-
+    # 单条件断言：通过时计数 PASS，失败时记录详情并计数 FAIL。
     def assert_true(self, condition: bool, label: str, details: str = "") -> None:
         retry_note = self._next_assert_retry_note
         self._next_assert_retry_note = ""
@@ -416,6 +386,7 @@ class ApiTester:
         self.failures.append(message)
         print(message)
 
+    # 解析响应 body 为 JSON，失败时标记断言失败并返回 None。
     def parse_json(self, result: HttpResult, label: str) -> Any:
         try:
             return json.loads(result.text)
@@ -427,24 +398,26 @@ class ApiTester:
             )
             return None
 
+    # 根据错误消息关键词标记已覆盖的错误类型，用于最终覆盖率检查。
     def _mark_error_coverage(self, message: str) -> None:
         if "Invalid query parameters" in message:
-            self.error_coverage["INVALID_QUERY_PARAMS"] = True
+            self.error_coverage["BAD_PARAMS"] = True
         elif "Invalid device" in message:
-            self.error_coverage["INVALID_DEVICE"] = True
+            self.error_coverage["BAD_DEVICE"] = True
         elif "Invalid brightness" in message:
-            self.error_coverage["INVALID_BRIGHTNESS"] = True
+            self.error_coverage["BAD_BRIGHTNESS"] = True
         elif "Invalid method" in message:
-            self.error_coverage["INVALID_METHOD"] = True
+            self.error_coverage["BAD_METHOD"] = True
         elif "Invalid theme" in message:
-            self.error_coverage["INVALID_THEME"] = True
+            self.error_coverage["BAD_THEME"] = True
         elif "Cannot mix include and exclude" in message:
             self.error_coverage["THEME_CONFLICT"] = True
         elif "No available images for the selected filters" in message:
-            self.error_coverage["NO_IMAGES_FOR_COMBINATION"] = True
+            self.error_coverage["NO_COMBO_IMAGES"] = True
         elif "No available images" in message:
-            self.error_coverage["NO_AVAILABLE_IMAGES"] = True
+            self.error_coverage["NO_IMAGES"] = True
 
+    # 校验错误响应的 JSON 结构：content-type、status、message 字段。
     def _assert_error_json_payload(
         self, result: HttpResult, expected_status: int, label: str
     ) -> dict[str, Any] | None:
@@ -481,7 +454,6 @@ class ApiTester:
         expected_detail_keys: list[str] | None = None,
         forbidden_detail_keys: list[str] | None = None,
         expected_field: str | None = None,
-        expected_received: str | None = None,
         expect_allowed_list: bool = False,
     ) -> None:
         # 错误场景统一断言：状态码、JSON 基本结构与可选 details 字段。
@@ -503,7 +475,6 @@ class ApiTester:
             expected_detail_keys is None
             and forbidden_detail_keys is None
             and expected_field is None
-            and expected_received is None
             and not expect_allowed_list
         ):
             return
@@ -531,13 +502,6 @@ class ApiTester:
             self.assert_true(
                 details.get("field") == expected_field,
                 f"{label} (details.field)",
-                str(details),
-            )
-
-        if expected_received is not None:
-            self.assert_true(
-                str(details.get("received")) == expected_received,
-                f"{label} (details.received)",
                 str(details),
             )
 
@@ -569,6 +533,7 @@ class ApiTester:
         )
         return result
 
+    # 断言 302 Location 头以 ASSET_BASE_URL 开头。
     def assert_redirect_asset_base(self, location: str, label: str) -> None:
         if not location:
             self.assert_true(False, label, "empty location")
@@ -579,6 +544,7 @@ class ApiTester:
             f"expected_prefix={self.asset_base_url}, location={location}",
         )
 
+    # 主测试流程入口：依次执行所有测试段落并汇总结果。
     def run(self) -> int:
         print(f"CONFIG env value: {_mask_config_for_log(CONFIG_RAW)}")
         print(f"Testing API base URL: {_mask_url_for_log(self.api_base_url)}")
@@ -631,6 +597,7 @@ class ApiTester:
             "groupTotals values are non-negative integers",
         )
 
+        # 将统计数据展开为 device/brightness/theme/count 的扁平列表，供后续测试使用。
         normalized_theme_details: list[dict[str, Any]] = []
         for theme, detail in theme_details.items():
             if not isinstance(detail, dict):
@@ -655,6 +622,7 @@ class ApiTester:
                     }
                 )
 
+        # 抽样校验 themeDetails 中首个条目的结构与类型。
         if theme_details:
             sample_theme, sample_detail = next(iter(theme_details.items()))
             self.register_theme_tokens([str(sample_theme)])
@@ -668,6 +636,7 @@ class ApiTester:
                     str(sample_total),
                 )
 
+        # 隐藏路由附带查询参数时应返回 403。
         self.expect_json_error(
             RANDOM_IMG_COUNT_PATH,
             {"x": "1"},
@@ -676,7 +645,17 @@ class ApiTester:
             "hidden count route query forbidden",
         )
 
-        # 2) 错误参数覆盖（仅 /random-img）
+        # 2) 请求方法限制：非 GET 方法应返回 405。
+        for bad_method in ["POST", "PUT", "DELETE", "PATCH"]:
+            method_result = self.request("/random-img", method=bad_method)
+            self.assert_true(
+                method_result.status == 405,
+                f"{bad_method} /random-img returns 405",
+                f"status={method_result.status}",
+            )
+
+        # 3) 错误参数覆盖（仅 /random-img）
+        # 非法 query key（不在白名单内）应返回 400。
         self.expect_json_error(
             "/random-img",
             {"x": "1"},
@@ -685,6 +664,7 @@ class ApiTester:
             "invalid query key",
             expected_detail_keys=["invalidParams", "allowedParams"],
         )
+        # 非法 device 值应返回 400 并附带 field/allowed 详情。
         self.expect_json_error(
             "/random-img",
             {"d": "bad-device"},
@@ -692,9 +672,9 @@ class ApiTester:
             "Invalid device",
             "invalid device",
             expected_field="d",
-            expected_received="bad-device",
             expect_allowed_list=True,
         )
+        # 非法 brightness 值应返回 400。
         self.expect_json_error(
             "/random-img",
             {"b": "bad-brightness"},
@@ -702,9 +682,9 @@ class ApiTester:
             "Invalid brightness",
             "invalid brightness",
             expected_field="b",
-            expected_received="bad-brightness",
             expect_allowed_list=True,
         )
+        # 非法 method 值应返回 400。
         self.expect_json_error(
             "/random-img",
             {"m": "bad-method"},
@@ -712,9 +692,9 @@ class ApiTester:
             "Invalid method",
             "invalid method",
             expected_field="m",
-            expected_received="bad-method",
             expect_allowed_list=True,
         )
+        # 不存在的主题名应返回 400，且不暴露 allowed 列表。
         self.expect_json_error(
             "/random-img",
             {"t": "__nonexistent_theme__"},
@@ -722,9 +702,9 @@ class ApiTester:
             "Invalid theme",
             "invalid theme",
             expected_field="t",
-            expected_received="__nonexistent_theme__",
             forbidden_detail_keys=["allowed"],
         )
+        # 含非法 key 时，即使其他参数合法也应优先返回 invalid query 错误。
         self.expect_json_error(
             "/random-img",
             {"m": "ReDiReCt", "x": "1"},
@@ -734,6 +714,7 @@ class ApiTester:
             expected_detail_keys=["invalidParams", "allowedParams"],
         )
 
+        # 非法 key 与合法已知参数混用时仍应拦截。
         self.expect_json_error(
             "/random-img",
             {"x": "1", "d": "pc", "m": "redirect"},
@@ -743,6 +724,7 @@ class ApiTester:
             expected_detail_keys=["invalidParams", "allowedParams"],
         )
 
+        # method 校验优先级高于 device/brightness/theme。
         self.expect_json_error(
             "/random-img",
             {"d": "bad-device", "m": "bad-method"},
@@ -750,10 +732,10 @@ class ApiTester:
             "Invalid method",
             "invalid method has priority over device/brightness/theme",
             expected_field="m",
-            expected_received="bad-method",
             expect_allowed_list=True,
         )
 
+        # 从统计数据中取一个有图的 device+brightness 组合，构造混合大小写参数进行测试。
         strict_mixed_case_group = next(
             (
                 (str(row["device"]), str(row["brightness"]))
@@ -772,7 +754,7 @@ class ApiTester:
             "LiGhT" if mixed_case_brightness_raw == "light" else "DaRk"
         )
 
-        # 3) 大小写兼容（始终覆盖 proxy 与 redirect）。
+        # 4) 大小写兼容（始终覆盖 proxy 与 redirect）。
         mixed_case_proxy = self.request(
             "/random-img",
             query={"d": mixed_case_device, "b": mixed_case_brightness, "m": "PrOxY"},
@@ -820,7 +802,7 @@ class ApiTester:
                 f"status={mixed_case_device_brightness_redirect.status}",
             )
 
-        # 4) 默认请求（proxy）
+        # 5) 默认请求（proxy）：不传任何参数时应返回图片二进制。
         default_img = self.request("/random-img")
         self.assert_true(
             default_img.status == 200,
@@ -836,7 +818,7 @@ class ApiTester:
             len(default_img.body) > 0, "GET /random-img default body non-empty"
         )
 
-        # 5) 基于统计数据做组合覆盖
+        # 6) 基于统计数据做组合覆盖：遍历每个设备×亮度分组，有图则测 proxy+redirect，无图则断言 404。
         nonzero_details = [
             row for row in normalized_theme_details if int(row["count"]) > 0
         ]
@@ -890,7 +872,7 @@ class ApiTester:
                         f"group {group_key} has no images",
                     )
 
-        # 6) 有效参数组合（严格断言成功状态）
+        # 7) 有效参数组合（严格断言成功状态）：动态构建各种合法 query 并验证返回 200 或 302。
         pc_has_images = (
             int(group_totals.get("pc-dark", 0)) + int(group_totals.get("pc-light", 0))
             > 0
@@ -969,7 +951,7 @@ class ApiTester:
                     f"query={query}, status={result.status}",
                 )
 
-        # 7) 多主题参数覆盖（使用统计结果中同组多个可用主题）
+        # 8) 多主题参数覆盖（使用统计结果中同组多个可用主题）：测试 CSV 与重复 t 参数两种形式。
         themes_by_group: dict[tuple[str, str], list[str]] = {}
         for row in nonzero_details:
             device = str(row["device"])
@@ -1115,11 +1097,11 @@ class ApiTester:
                 "[SKIP] 不存在同 device+brightness 下至少 2 个可用主题，跳过多主题断言"
             )
 
-        # 7.5) 主题排除（t=!theme）功能覆盖
+        # 8.5) 主题排除（t=!theme）功能覆盖：测试混用冲突、无效主题、单/多主题排除、全部排除。
         all_themes = sorted(theme_details.keys())
         self.register_theme_tokens(all_themes)
 
-        # 7.5.1) 包含与排除混用 → 400 THEME_INCLUDE_EXCLUDE_CONFLICT
+        # 8.5.1) 包含与排除混用 → 400 THEME_INCLUDE_EXCLUDE_CONFLICT
         if len(all_themes) >= 2:
             mix_include = all_themes[0]
             mix_exclude = all_themes[1]
@@ -1129,7 +1111,8 @@ class ApiTester:
                 400,
                 "Cannot mix include and exclude",
                 "theme include-exclude conflict (csv)",
-                expected_detail_keys=["includeThemes", "excludeThemes", "hint"],
+                expected_detail_keys=["hint"],
+                forbidden_detail_keys=["includeThemes", "excludeThemes"],
             )
 
             # 重复参数形式混用
@@ -1149,7 +1132,7 @@ class ApiTester:
         else:
             print("[SKIP] 不足 2 个主题，跳过主题包含排除混用断言")
 
-        # 7.5.2) 排除不存在的主题 → 400 INVALID_THEME
+        # 8.5.2) 排除不存在的主题 → 400 BAD_THEME
         self.expect_json_error(
             "/random-img",
             {"t": "!__nonexistent_theme__"},
@@ -1157,11 +1140,10 @@ class ApiTester:
             "Invalid theme",
             "exclude invalid theme",
             expected_field="t",
-            expected_received="!__nonexistent_theme__",
             forbidden_detail_keys=["allowed"],
         )
 
-        # 7.5.3) 排除单个主题，其他主题有图 → 200
+        # 8.5.3) 排除单个主题，其他主题有图 → 200
         if multi_theme_group:
             device, brightness, themes = multi_theme_group
             exclude_one = themes[0]
@@ -1195,7 +1177,7 @@ class ApiTester:
                     f"status={exclude_redirect.status}",
                 )
 
-            # 7.5.4) csv 排除多个主题
+            # 8.5.4) csv 排除多个主题
             if len(themes) >= 3:
                 exclude_csv = f"!{themes[0]},!{themes[1]}"
                 exclude_csv_result = self.request(
@@ -1211,7 +1193,7 @@ class ApiTester:
             else:
                 print("[SKIP] 不足 3 个可用主题，跳过 csv 多主题排除断言")
 
-            # 7.5.5) 重复参数排除多个主题
+            # 8.5.5) 重复参数排除多个主题
             if len(themes) >= 3:
                 exclude_repeat_result = self.request_query_items(
                     "/random-img",
@@ -1232,7 +1214,7 @@ class ApiTester:
             else:
                 print("[SKIP] 不足 3 个可用主题，跳过重复参数多主题排除断言")
 
-            # 7.5.6) 排除全部主题 → 404 NO_IMAGES_FOR_COMBINATION
+            # 8.5.6) 排除全部主题 → 404 NO_COMBO_IMAGES
             all_exclude_csv = ",".join(f"!{t}" for t in themes)
             self.expect_json_error(
                 "/random-img",
@@ -1245,7 +1227,7 @@ class ApiTester:
         else:
             print("[SKIP] 不存在多主题组合，跳过主题排除功能断言")
 
-        # 8) 每个有图组合至少测一次
+        # 9) 每个有图组合至少测一次：遍历所有 count>0 的 device+brightness+theme，分别验证 proxy 和 redirect。
         for row in nonzero_details:
             device = str(row["device"])
             brightness = str(row["brightness"])
@@ -1286,6 +1268,7 @@ class ApiTester:
                     f"status={redirect_result.status}",
                 )
 
+        # count=0 的组合应返回 404。
         if zero_details:
             row = zero_details[0]
             device = str(row["device"])
@@ -1299,7 +1282,7 @@ class ApiTester:
                 f"no images for combination {device}-{brightness}-{theme}",
             )
 
-        # 9) 方法模式行为：始终测试 proxy 与 redirect（按开关断言 redirect 语义）。
+        # 10) 方法模式行为：测试 proxy 返回 200，redirect 按开关断言 302 或回退 200，并校验 Location 格式。
         proxy_any = self.request(
             "/random-img", query={"m": "proxy"}, follow_redirects=True
         )
@@ -1339,6 +1322,7 @@ class ApiTester:
                 f"status={redirect_any.status}",
             )
 
+        # 带筛选条件的 redirect 请求也应正常返回。
         redirect_with_filters = self.request(
             "/random-img",
             query={"d": "r", "b": strict_random_brightness, "m": "redirect"},
@@ -1357,7 +1341,7 @@ class ApiTester:
                 f"status={redirect_with_filters.status}",
             )
 
-        # 10) 稳定性抽样：始终测试 proxy，redirect 按开关断言。
+        # 11) 稳定性抽样：多次随机请求验证返回状态一致性，确保不会偶发失败。
         for i in range(self.random_runs):
             proxy_sample = self.request(
                 "/random-img", query={"m": "proxy"}, follow_redirects=True
@@ -1385,6 +1369,7 @@ class ApiTester:
                     f"status={redirect_sample.status}",
                 )
 
+        # 最终覆盖率检查：确保必须覆盖的错误类型均已触发。
         missing_hard = sorted(
             k
             for k in REQUIRED_ERROR_COVERAGE_KEYS
@@ -1422,6 +1407,7 @@ class ApiTester:
         return 0
 
 
+# 入口：初始化 ApiTester 并执行全部测试，以退出码反映测试结果。
 def main() -> None:
     tester = ApiTester(
         api_base_url=API_BASE_URL,

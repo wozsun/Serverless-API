@@ -2,10 +2,14 @@
 // KV 常量
 // ===========================
 
+// 正常值缓存有效期（毫秒）
 const KV_CACHE_TTL_MS = 60 * 1000;
-const KV_NEGATIVE_CACHE_TTL_MS = 3 * 1000;
+// 空值（未命中）缓存有效期（毫秒），避免短时间内重复回源
+const KV_NEGATIVE_CACHE_TTL_MS = 1 * 1000;
+// KV 读取最大重试次数
 const KV_GET_MAX_ATTEMPTS = 5;
-const KV_RETRY_BASE_DELAY_MS = 60;
+// 重试间隔基数（毫秒），实际延迟 = 基数 × 当前重试次数
+const KV_RETRY_BASE_DELAY_MS = 50;
 
 // ===========================
 // KV 客户端

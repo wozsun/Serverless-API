@@ -25,12 +25,8 @@ const buildForbiddenResponse = (details) =>
 	jsonErrorResponse(REFERER_ERRORS.FORBIDDEN_REFERER, details);
 
 // 构造 Referer 配置错误响应。
-const buildConfigErrorResponse = (namespace) =>
-	jsonErrorResponse(REFERER_ERRORS.ALLOWED_REFERER_CONFIG_ERROR, {
-		configKey: ALLOWED_REFERER_KEY,
-		namespace,
-		hint: "Ensure ALLOWED_REFERER exists in KV and contains one referer pattern per line",
-	});
+const buildConfigErrorResponse = () =>
+	jsonErrorResponse(REFERER_ERRORS.ALLOWED_REFERER_CONFIG_ERROR);
 
 // 读取指定 namespace 下的允许 Referer 列表。
 const loadAllowedReferer = (namespace) =>
@@ -96,10 +92,9 @@ export const validateRefererAccess = async ({ namespace, referer = "", allowEmpt
 
 	const allowedReferer = await loadAllowedReferer(namespace);
 	if (!allowedReferer) {
-		console.warn("Referer config invalid or missing");
 		return {
 			allowed: false,
-			response: buildConfigErrorResponse(namespace),
+			response: buildConfigErrorResponse(),
 		};
 	}
 
