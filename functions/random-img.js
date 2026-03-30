@@ -84,9 +84,7 @@ const buildInvalidFieldResponse = (error, field, allowed) =>
 
 // 检查查询参数是否都在白名单内，若存在非法参数则直接返回 400 错误响应。
 const validateAllowedQueryParams = (params, allowedParams) => {
-	// 遍历请求中出现的每个查询参数键。
 	for (const key of params.keys()) {
-		// 若当前参数不在允许集合中，则立即返回错误。
 		if (!allowedParams.has(key)) {
 			return jsonErrorResponse(ERRORS.BAD_PARAMS, {
 				invalidParams: [key],
@@ -94,10 +92,11 @@ const validateAllowedQueryParams = (params, allowedParams) => {
 			});
 		}
 	}
-	// 若不存在非法参数，则返回 null 表示通过校验。
+	// 全部合法，返回 null。
 	return null;
 };
 
+// 有效主题缓存：避免每次请求重复从 FOLDER_MAP 提取主题列表。
 let validThemeCache = {
 	themes: null,
 	themeSet: null,
@@ -158,7 +157,7 @@ const validateRefererByConfig = async (request) => {
 	});
 };
 
-// 根据所选文件夹组合随机生成一个图片 URL。
+// 根据所选组合随机生成图片 URL，格式：{baseUrl}{device}-{brightness}/{theme}/{number}.webp
 const buildImageUrl = (baseImageUrl, selectedFolder) => {
 	const imageNumber = Math.floor(Math.random() * selectedFolder.count) + 1;
 	const imageFilename = `${String(imageNumber).padStart(IMAGE_FILENAME_DIGITS, "0")}.webp`;
@@ -224,7 +223,6 @@ export const handleRandomImg = async (request) => {
 	}
 
 	const refererCheckResult = await validateRefererByConfig(request);
-	// Referer 校验未通过，返回拒绝响应。
 	if (!refererCheckResult.allowed) {
 		return refererCheckResult.response;
 	}
@@ -242,10 +240,8 @@ export const handleRandomImg = async (request) => {
 		});
 	}
 
-	// 第一步：优先校验链接参数合法性，再做后续处理
-	// 执行参数白名单校验，返回值为 null 或错误响应对象。
+	// 校验查询参数白名单，存在非法参数时直接返回错误。
 	const invalidParamsResponse = validateAllowedQueryParams(params, ALLOWED_PARAMS_SET);
-	// 若存在非法参数，直接返回错误响应并中止流程。
 	if (invalidParamsResponse) {
 		return invalidParamsResponse;
 	}
@@ -253,27 +249,23 @@ export const handleRandomImg = async (request) => {
 	// 读取 method 参数，缺省时默认使用 proxy。
 	const method = params.get("m")?.toLowerCase() || "proxy";
 
-	// 校验 method 参数：仅允许 proxy 或 redirect
-	// 判断 method 是否在允许集合内。
-	// method 不在允许集合内，返回参数错误。
+	// 校验 method 参数：仅允许 proxy 或 redirect。
 	if (!METHOD_SET.has(method)) {
 		return buildInvalidFieldResponse(ERRORS.BAD_METHOD, "m", METHOD_VALUES);
 	}
 
-	// 强制开关：若关闭重定向，则无论参数如何都用 proxy
+	// 强制开关：若关闭 redirect，则无论参数如何都用 proxy。
 	const effectiveMethod = REDIRECT_ENABLED ? method : "proxy";
 
 	// 读取请求指定的设备参数（若未传则为 null）。
 	const requestedDevice = params.get("d")?.toLowerCase() || null;
-	// 若传入了设备参数，则校验其是否属于请求允许集合。
-	// 设备值无效，返回参数错误。
+	// 校验设备参数合法性（允许 pc / mb / r）。
 	if (requestedDevice && !REQUEST_DEVICE_SET.has(requestedDevice)) {
 		return buildInvalidFieldResponse(ERRORS.BAD_DEVICE, "d", REQUEST_DEVICES);
 	}
 
-	// 设备选择逻辑：优先使用请求参数，其次根据 User-Agent 判断移动/桌面，最后退回默认设备 "r"（random）。
+	// 设备选择：优先使用请求参数；未指定时根据 User-Agent 判断移动/桌面；均无法识别时退回 "r"（随机）。
 	let autoDevice = "r";
-	// 未指定设备时，通过 User-Agent 自动判断移动或桌面。
 	if (!requestedDevice) {
 		const userAgent = request.headers.get("User-Agent") || "";
 		const isMobile = /Mobi|Android|iPhone/i.test(userAgent);
@@ -281,13 +273,20 @@ export const handleRandomImg = async (request) => {
 		autoDevice = isMobile ? "mb" : (isDesktop ? "pc" : "r");
 	}
 	const device = requestedDevice || autoDevice;
+	// 构建设备候选列表："r" 展开为全部设备，否则仅用指定值。
+	const deviceCandidates =
+		device === "r"
+			? MAP_DEVICES
+			: [device];
+
 	// 读取亮度参数（若未传则为 null）。
 	const requestedBrightness = params.get("b")?.toLowerCase() || null;
-	// 若传入亮度参数，则校验其合法性。
-	// 亮度值无效，返回参数错误。
+	// 校验亮度参数合法性（允许 dark / light）。
 	if (requestedBrightness && !BRIGHTNESS_SET.has(requestedBrightness)) {
 		return buildInvalidFieldResponse(ERRORS.BAD_BRIGHTNESS, "b", BRIGHTNESS_VALUES);
 	}
+	// 构建亮度候选列表：指定时仅用该值，否则使用全部亮度。
+	const brightnessCandidates = requestedBrightness ? [requestedBrightness] : BRIGHTNESS_VALUES;
 
 	// 读取并归一化 theme 参数：支持多次传参与逗号分隔，最终去重。
 	// 以 ! 为前缀的值表示排除该主题，不带前缀为包含，两者不可混用。
@@ -300,23 +299,12 @@ export const handleRandomImg = async (request) => {
 	const themeIncludes = rawThemeValues.filter((v) => !v.startsWith("!"));
 	const themeExcludes = rawThemeValues.filter((v) => v.startsWith("!")).map((v) => v.slice(1)).filter(Boolean);
 
-	// 包含与排除不可混用。
-	// 同时存在包含与排除主题时，返回冲突错误。
+	// 包含与排除不可混用，同时存在时返回冲突错误。
 	if (themeIncludes.length > 0 && themeExcludes.length > 0) {
 		return jsonErrorResponse(ERRORS.THEME_CONFLICT, {
 			hint: "Use either include themes (e.g. t=nature) or exclude themes (e.g. t=!nature), not both",
 		});
 	}
-
-	// 处理 device 参数
-	const deviceCandidates =
-		device === "r"
-			? MAP_DEVICES
-			: [device];
-
-	// 处理 brightness 参数
-	// 若指定亮度则只用该值，否则使用全部亮度候选。
-	const brightnessCandidates = requestedBrightness ? [requestedBrightness] : BRIGHTNESS_VALUES;
 
 	// 并行读取 FOLDER_MAP 与 BASE_IMAGE_URL 配置（两者互不依赖）。
 	const [folderMap, baseImageUrl] = await Promise.all([
@@ -327,8 +315,7 @@ export const handleRandomImg = async (request) => {
 			cacheKey: "random-img::base-image-url",
 		}),
 	]);
-	// 若配置异常则返回统一配置错误响应。
-	// FOLDER_MAP 为空时返回配置错误。
+	// FOLDER_MAP 缺失或无效时返回配置错误。
 	if (!folderMap) {
 		return jsonErrorResponse(ERRORS.BAD_FOLDER_MAP);
 	}
@@ -337,44 +324,34 @@ export const handleRandomImg = async (request) => {
 		return jsonErrorResponse(ERRORS.BAD_BASE_URL);
 	}
 
-	// 处理 theme 参数：统一校验所有提及的主题名是否在配置中存在。
+	// 校验主题参数：所有提及的主题名必须在 FOLDER_MAP 中存在。
 	const themeCache = ensureValidThemeCache(folderMap);
 	const allMentionedThemes = [...themeIncludes, ...themeExcludes];
-	// 若指定了主题参数，校验每个主题名是否在配置中存在。
 	if (allMentionedThemes.length > 0) {
 		const invalidTheme = allMentionedThemes.find((t) => !themeCache.themeSet.has(t));
-		// 发现无效主题名，返回参数错误。
 		if (invalidTheme) {
 			return buildInvalidFieldResponse(ERRORS.BAD_THEME, "t");
 		}
 	}
 
+	// 构建主题候选列表：有包含则直接用，有排除则从全量中过滤，均未指定则使用全部主题。
 	let themeCandidates;
-	// 有明确包含列表时，直接用包含值。
 	if (themeIncludes.length > 0) {
 		themeCandidates = themeIncludes;
-	// 有排除列表时，从全量主题中过滤掉排除项。
 	} else if (themeExcludes.length > 0) {
 		const excludeSet = new Set(themeExcludes);
 		themeCandidates = themeCache.themes.filter((t) => !excludeSet.has(t));
 	} else {
-		// 未传 t 时，才构建并使用全量主题候选。
 		themeCandidates = themeCache.themes;
 	}
 
-	// 初始化候选组合列表，用于后续加权随机抽样。
+	// 三重遍历（设备 × 亮度 × 主题）构建候选组合，仅保留图片数 > 0 的有效组合。
 	const candidates = [];
-	// 遍历设备候选集合。
 	for (const candidateDevice of deviceCandidates) {
-		// 读取当前设备下的配置映射。
 		const deviceMap = folderMap[candidateDevice] ?? {};
-		// 遍历亮度候选集合。
 		for (const b of brightnessCandidates) {
-			// 遍历主题候选集合。
 			for (const t of themeCandidates) {
-				// 读取当前组合的图片数量并归一化为数值，缺省按 0 处理。
 				const count = Number(deviceMap?.[b]?.[t] ?? 0);
-				// 仅将有限且大于 0 的组合纳入候选池。
 				if (Number.isFinite(count) && count > 0) {
 					candidates.push({ device: candidateDevice, brightness: b, theme: t, count });
 				}
@@ -382,10 +359,8 @@ export const handleRandomImg = async (request) => {
 		}
 	}
 
-	// 若候选池为空，则根据是否传过滤条件返回不同的 404 错误。
-	// 候选池为空，根据是否有过滤条件返回不同 404 错误。
+	// 候选池为空时，根据是否指定了过滤条件返回不同的 404 错误。
 	if (candidates.length === 0) {
-		// 指定了亮度或主题（含排除）但无结果时，返回组合无图错误并回显过滤条件。
 		if (requestedBrightness || themeIncludes.length > 0 || themeExcludes.length > 0) {
 			return jsonErrorResponse(ERRORS.NO_COMBO_IMAGES, {
 				filters: {
@@ -396,32 +371,26 @@ export const handleRandomImg = async (request) => {
 				},
 			});
 		}
-		// 未指定过滤条件且仍无可用图时，返回通用无图错误。
 		return jsonErrorResponse(ERRORS.NO_IMAGES, {
 			hint: "Check FOLDER_MAP counts in KV to ensure at least one image count is greater than 0",
 		});
 	}
 
+	// 加权随机抽样：以 count 为权重选取候选组合，使每张图片被选中的概率趋于均等。
 	let selectedFolder;
-	// 仅一个候选时直接选中，跳过加权抽样。
 	if (candidates.length === 1) {
 		selectedFolder = candidates[0];
 	} else {
-		// 加权抽样：按 count 作为权重选择候选组合，保证"每张图"更接近等概率
-		// 计算候选池总权重（各组合 count 之和）。
 		const totalWeight = candidates.reduce((sum, candidate) => sum + candidate.count, 0);
-		// 权重异常兜底，避免 totalWeight 非法导致随机逻辑出错。
-		// 总权重非法，兜底返回无可用图片错误。
+		// 总权重非法时兜底返回错误，避免随机逻辑异常。
 		if (!Number.isFinite(totalWeight) || totalWeight <= 0) {
 			return jsonErrorResponse(ERRORS.NO_IMAGES, {
 				hint: "No valid weighted candidates available",
 			});
 		}
-		// 在 [0, totalWeight) 区间生成随机权重点，减少边界判断出错风险。
+		// 在 [0, totalWeight) 区间取随机点，线性递减直到命中。
 		let remainingWeight = Math.random() * totalWeight;
-		// 命中结果初始化为 null，循环后再统一兜底。
 		selectedFolder = null;
-		// 线性递减权重，首次小于 0 时即命中当前候选项。
 		for (const candidate of candidates) {
 			remainingWeight -= candidate.count;
 			if (remainingWeight < 0) {
@@ -429,13 +398,13 @@ export const handleRandomImg = async (request) => {
 				break;
 			}
 		}
-		// 浮点边界兜底：理论上不会触发，触发时选最后一个候选项。
-		// 浮点精度导致未命中任何候选，兜底取最后一项。
+		// 浮点精度兜底：理论上不会触发，取最后一项作为保底。
 		if (!selectedFolder) {
 			selectedFolder = candidates[candidates.length - 1];
 		}
 	}
 
+	// 构建图片 URL 并按所选方式（proxy / redirect）响应。
 	return await respondImageByMethod(effectiveMethod, buildImageUrl(baseImageUrl, selectedFolder));
 };
 
