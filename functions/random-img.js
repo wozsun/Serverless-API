@@ -31,6 +31,9 @@ const FETCH_RETRY_DELAY_MS = 50;
 // 是否允许 redirect 响应方式，关闭时强制回退为 proxy。
 const REDIRECT_ENABLED = true;
 
+// proxy 模式下是否返回 X-Image-Info 响应头（包含图片分组信息）。
+const IMAGE_INFO_HEADER_ENABLED = true;
+
 // 是否启用 Referer 校验，关闭时跳过白名单检查。
 const REFERER_CHECK_ENABLED = false;
 // Referer 校验启用时，是否允许空 Referer（直接访问）。
@@ -158,14 +161,17 @@ const validateRefererByConfig = async (request) => {
 };
 
 // 根据所选组合随机生成图片 URL，格式：{baseUrl}{device}-{brightness}/{theme}/{number}.webp
-const buildImageUrl = (baseImageUrl, selectedFolder) => {
+// 同时返回未补位的图片序号，供 X-Image-Info 响应头使用。
+const buildImageResult = (baseImageUrl, selectedFolder) => {
 	const imageNumber = Math.floor(Math.random() * selectedFolder.count) + 1;
 	const imageFilename = `${String(imageNumber).padStart(IMAGE_FILENAME_DIGITS, "0")}.webp`;
-	return `${baseImageUrl}${selectedFolder.device}-${selectedFolder.brightness}/${selectedFolder.theme}/${imageFilename}`;
+	const url = `${baseImageUrl}${selectedFolder.device}-${selectedFolder.brightness}/${selectedFolder.theme}/${imageFilename}`;
+	const imageInfo = `${selectedFolder.device}-${selectedFolder.brightness}-${selectedFolder.theme}-${imageNumber}`;
+	return { url, imageInfo };
 };
 
 // 按指定 method 响应图片：redirect 直接跳转，proxy 拉取上游后转发（失败时按次数重试）。
-const respondImageByMethod = async (method, imageUrl) => {
+const respondImageByMethod = async (method, imageUrl, imageInfo) => {
 	// redirect 模式：直接构造 302 跳转响应。
 	if (method === "redirect") {
 		try {
@@ -195,10 +201,14 @@ const respondImageByMethod = async (method, imageUrl) => {
 				});
 			}
 
-			return new Response(upstreamResponse.body, {
+			const response = new Response(upstreamResponse.body, {
 				status: upstreamResponse.status,
 				headers: upstreamResponse.headers,
 			});
+			if (IMAGE_INFO_HEADER_ENABLED) {
+				response.headers.set("X-Image-Info", imageInfo);
+			}
+			return response;
 		} catch {
 			// 已耗尽重试次数，返回上游请求失败错误。
 			if (attempt >= FETCH_MAX_ATTEMPTS) {
@@ -405,7 +415,8 @@ export const handleRandomImg = async (request) => {
 	}
 
 	// 构建图片 URL 并按所选方式（proxy / redirect）响应。
-	return await respondImageByMethod(effectiveMethod, buildImageUrl(baseImageUrl, selectedFolder));
+	const { url: imageUrl, imageInfo } = buildImageResult(baseImageUrl, selectedFolder);
+	return await respondImageByMethod(effectiveMethod, imageUrl, imageInfo);
 };
 
 // 汇总 FOLDER_MAP 中的图片数量：按设备-亮度组合分组、按主题聚合、并计算总数。
