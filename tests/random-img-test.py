@@ -9,6 +9,7 @@
     1) 隐藏统计路由 — 校验响应结构与数据类型
     2) 请求方法限制 — 非 GET 方法应返回 405
     3) 错误参数覆盖 — 各类非法参数返回对应 4xx 错误
+    3.5) 单值参数重复 — d/b/m 重复时返回 400，t 重复则允许
     4) 大小写兼容 — 参数值大小写不敏感
     5) 默认请求 — 无参数时 proxy 返回图片
     6) 组合覆盖 — 基于统计数据遍历设备×亮度
@@ -82,6 +83,7 @@ SUPPORTED_BRIGHTNESS = {"dark", "light"}
 # 一次完整测试中必须覆盖到的错误类型。
 REQUIRED_ERROR_COVERAGE_KEYS = {
     "BAD_PARAMS",
+    "DUPLICATE_PARAM",
     "BAD_DEVICE",
     "BAD_BRIGHTNESS",
     "BAD_METHOD",
@@ -230,6 +232,7 @@ class ApiTester:
         self.random_runs = random_runs
         self.error_coverage: dict[str, bool] = {
             "BAD_PARAMS": False,
+            "DUPLICATE_PARAM": False,
             "BAD_DEVICE": False,
             "BAD_BRIGHTNESS": False,
             "BAD_METHOD": False,
@@ -411,6 +414,8 @@ class ApiTester:
     def _mark_error_coverage(self, message: str) -> None:
         if "Invalid query parameters" in message:
             self.error_coverage["BAD_PARAMS"] = True
+        elif "Duplicate query parameter" in message:
+            self.error_coverage["DUPLICATE_PARAM"] = True
         elif "Invalid device" in message:
             self.error_coverage["BAD_DEVICE"] = True
         elif "Invalid brightness" in message:
@@ -673,7 +678,7 @@ class ApiTester:
             "invalid query key",
             expected_detail_keys=["invalidParams", "allowedParams"],
         )
-        # 非法 device 值应返回 400 并附带 field/allowed 详情。
+        # 非法 device 值应返回 400 并附带 field 详情。
         self.expect_json_error(
             "/random-img",
             {"d": "bad-device"},
@@ -681,7 +686,7 @@ class ApiTester:
             "Invalid device",
             "invalid device",
             expected_field="d",
-            expect_allowed_list=True,
+            forbidden_detail_keys=["allowed"],
         )
         # 非法 brightness 值应返回 400。
         self.expect_json_error(
@@ -691,7 +696,7 @@ class ApiTester:
             "Invalid brightness",
             "invalid brightness",
             expected_field="b",
-            expect_allowed_list=True,
+            forbidden_detail_keys=["allowed"],
         )
         # 非法 method 值应返回 400。
         self.expect_json_error(
@@ -701,7 +706,7 @@ class ApiTester:
             "Invalid method",
             "invalid method",
             expected_field="m",
-            expect_allowed_list=True,
+            forbidden_detail_keys=["allowed"],
         )
         # 不存在的主题名应返回 400，且不暴露 allowed 列表。
         self.expect_json_error(
@@ -741,8 +746,126 @@ class ApiTester:
             "Invalid method",
             "invalid method has priority over device/brightness/theme",
             expected_field="m",
-            expect_allowed_list=True,
+            forbidden_detail_keys=["allowed"],
         )
+
+        # 3.5) 单值参数重复（d/b/m 各只能出现一次）→ 400 DUPLICATE_PARAM
+        dup_device_result = self.request_query_items(
+            "/random-img",
+            query_items=[("d", "pc"), ("d", "mb")],
+            follow_redirects=True,
+        )
+        self.assert_true(
+            dup_device_result.status == 400,
+            "duplicate device param status",
+            f"status={dup_device_result.status}, expected=400",
+        )
+        dup_device_payload = self._assert_error_json_payload(
+            dup_device_result, 400, "duplicate device param"
+        )
+        if isinstance(dup_device_payload, dict):
+            dup_device_message = str(dup_device_payload.get("message", ""))
+            self.assert_true(
+                "Duplicate query parameter" in dup_device_message,
+                "duplicate device param message",
+                f"message={dup_device_message}",
+            )
+            dup_device_details = dup_device_payload.get("details", {})
+            self.assert_true(
+                isinstance(dup_device_details, dict) and dup_device_details.get("field") == "d",
+                "duplicate device param field=d",
+                str(dup_device_details),
+            )
+
+        dup_brightness_result = self.request_query_items(
+            "/random-img",
+            query_items=[("b", "dark"), ("b", "light")],
+            follow_redirects=True,
+        )
+        self.assert_true(
+            dup_brightness_result.status == 400,
+            "duplicate brightness param status",
+            f"status={dup_brightness_result.status}, expected=400",
+        )
+        dup_brightness_payload = self._assert_error_json_payload(
+            dup_brightness_result, 400, "duplicate brightness param"
+        )
+        if isinstance(dup_brightness_payload, dict):
+            dup_brightness_message = str(dup_brightness_payload.get("message", ""))
+            self.assert_true(
+                "Duplicate query parameter" in dup_brightness_message,
+                "duplicate brightness param message",
+                f"message={dup_brightness_message}",
+            )
+            dup_brightness_details = dup_brightness_payload.get("details", {})
+            self.assert_true(
+                isinstance(dup_brightness_details, dict) and dup_brightness_details.get("field") == "b",
+                "duplicate brightness param field=b",
+                str(dup_brightness_details),
+            )
+
+        dup_method_result = self.request_query_items(
+            "/random-img",
+            query_items=[("m", "proxy"), ("m", "redirect")],
+            follow_redirects=True,
+        )
+        self.assert_true(
+            dup_method_result.status == 400,
+            "duplicate method param status",
+            f"status={dup_method_result.status}, expected=400",
+        )
+        dup_method_payload = self._assert_error_json_payload(
+            dup_method_result, 400, "duplicate method param"
+        )
+        if isinstance(dup_method_payload, dict):
+            dup_method_message = str(dup_method_payload.get("message", ""))
+            self.assert_true(
+                "Duplicate query parameter" in dup_method_message,
+                "duplicate method param message",
+                f"message={dup_method_message}",
+            )
+            dup_method_details = dup_method_payload.get("details", {})
+            self.assert_true(
+                isinstance(dup_method_details, dict) and dup_method_details.get("field") == "m",
+                "duplicate method param field=m",
+                str(dup_method_details),
+            )
+
+        # 重复 t 参数应仍然允许（t 是多值参数）。
+        any_valid_theme = next(
+            (str(row["theme"]) for row in normalized_theme_details if int(row["count"]) > 0),
+            None,
+        )
+        if any_valid_theme:
+            dup_theme_ok = self.request_query_items(
+                "/random-img",
+                query_items=[("t", any_valid_theme), ("t", any_valid_theme), ("m", "proxy")],
+                follow_redirects=True,
+            )
+            self.assert_true(
+                dup_theme_ok.status == 200,
+                "duplicate theme param still allowed",
+                f"status={dup_theme_ok.status}",
+            )
+
+        # 非法 key 校验优先级高于重复参数校验。
+        dup_with_invalid_key = self.request_query_items(
+            "/random-img",
+            query_items=[("x", "1"), ("d", "pc"), ("d", "mb")],
+            follow_redirects=True,
+        )
+        self.assert_true(
+            dup_with_invalid_key.status == 400,
+            "invalid key priority over duplicate param",
+            f"status={dup_with_invalid_key.status}",
+        )
+        dup_with_invalid_payload = self.parse_json(dup_with_invalid_key, "invalid key priority json")
+        if isinstance(dup_with_invalid_payload, dict):
+            self.assert_true(
+                "Invalid query parameters" in str(dup_with_invalid_payload.get("message", "")),
+                "invalid key priority message over duplicate",
+                str(dup_with_invalid_payload.get("message", "")),
+            )
 
         # 从统计数据中取一个有图的 device+brightness 组合，构造混合大小写参数进行测试。
         strict_mixed_case_group = next(
@@ -1142,8 +1265,7 @@ class ApiTester:
                 400,
                 "Cannot mix include and exclude",
                 "theme include-exclude conflict (csv)",
-                expected_detail_keys=["hint"],
-                forbidden_detail_keys=["includeThemes", "excludeThemes"],
+                expected_detail_keys=["include", "exclude", "hint"],
             )
 
             # 重复参数形式混用
