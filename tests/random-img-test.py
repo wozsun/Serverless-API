@@ -55,8 +55,14 @@ CONFIG_ENV_NAME = "CONFIG"
 TIMEOUT_SECONDS = 30.0
 # 稳定性测试中抽样次数。
 RANDOM_RUNS = 10
+# 未传 m 参数时的默认响应方式。
+DEFAULT_METHOD = "proxy"
 # redirect 行为开关：True=期望 m=redirect 返回 302，False=期望回退到 proxy。
 REDIRECT_ENABLED = True
+# proxy 模式下是否返回图片信息响应头。
+IMAGE_INFO_HEADER_ENABLED = True
+# proxy 模式下图片信息响应头名称。
+IMAGE_INFO_HEADER_NAME = "X-Image-Info"
 # 图片文件名数字位数（例如 6 -> 000001.webp）。
 IMAGE_FILENAME_DIGITS = 6
 # 5xx 响应最大重试次数（不含首次请求）。
@@ -154,6 +160,9 @@ SENSITIVE_LOG_TOKENS = sorted(
 
 # 重定向地址格式校验正则（基于 ASSET_BASE_URL 做完整 URL 校验）。
 REDIRECT_LOCATION_PATTERN = rf"^{re.escape(ASSET_BASE_URL)}(pc|mb)-(dark|light)/[a-z0-9_-]+/\d{{{IMAGE_FILENAME_DIGITS}}}\.webp$"
+
+# X-Image-Info 响应头格式校验正则：{device}-{brightness}-{theme}-{imageNumber}
+IMAGE_INFO_HEADER_PATTERN = re.compile(r"^(pc|mb)-(dark|light)-[a-z0-9_-]+-\d+$")
 
 
 # ===========================
@@ -802,21 +811,43 @@ class ApiTester:
                 f"status={mixed_case_device_brightness_redirect.status}",
             )
 
-        # 5) 默认请求（proxy）：不传任何参数时应返回图片二进制。
-        default_img = self.request("/random-img")
-        self.assert_true(
-            default_img.status == 200,
-            "GET /random-img default status",
-            f"status={default_img.status}",
-        )
-        self.assert_true(
-            "application/json" not in default_img.headers.get("content-type", ""),
-            "GET /random-img default content-type not json",
-            default_img.headers.get("content-type", ""),
-        )
-        self.assert_true(
-            len(default_img.body) > 0, "GET /random-img default body non-empty"
-        )
+        # 5) 默认请求：不传 m 参数时应按 DEFAULT_METHOD 行为响应。
+        default_img = self.request("/random-img", follow_redirects=False)
+        if DEFAULT_METHOD == "redirect" and REDIRECT_ENABLED:
+            self.assert_true(
+                default_img.status == 302,
+                "GET /random-img default status (redirect)",
+                f"status={default_img.status}",
+            )
+            default_location = default_img.headers.get("location", "")
+            self.assert_true(
+                bool(default_location),
+                "GET /random-img default location present",
+            )
+            self.assert_redirect_asset_base(
+                default_location, "GET /random-img default asset base match"
+            )
+        else:
+            self.assert_true(
+                default_img.status == 200,
+                "GET /random-img default status",
+                f"status={default_img.status}",
+            )
+            self.assert_true(
+                "application/json" not in default_img.headers.get("content-type", ""),
+                "GET /random-img default content-type not json",
+                default_img.headers.get("content-type", ""),
+            )
+            self.assert_true(
+                len(default_img.body) > 0, "GET /random-img default body non-empty"
+            )
+            if IMAGE_INFO_HEADER_ENABLED:
+                info_val = default_img.headers.get(IMAGE_INFO_HEADER_NAME.lower(), "")
+                self.assert_true(
+                    bool(IMAGE_INFO_HEADER_PATTERN.match(info_val)),
+                    f"GET /random-img default {IMAGE_INFO_HEADER_NAME} format",
+                    f"value={info_val}",
+                )
 
         # 6) 基于统计数据做组合覆盖：遍历每个设备×亮度分组，有图则测 proxy+redirect，无图则断言 404。
         nonzero_details = [
@@ -1291,6 +1322,18 @@ class ApiTester:
             "GET /random-img?m=proxy status",
             f"status={proxy_any.status}",
         )
+        if IMAGE_INFO_HEADER_ENABLED:
+            info_val = proxy_any.headers.get(IMAGE_INFO_HEADER_NAME.lower(), "")
+            self.assert_true(
+                bool(IMAGE_INFO_HEADER_PATTERN.match(info_val)),
+                f"GET /random-img?m=proxy {IMAGE_INFO_HEADER_NAME} format",
+                f"value={info_val}",
+            )
+        else:
+            self.assert_true(
+                IMAGE_INFO_HEADER_NAME.lower() not in proxy_any.headers,
+                f"GET /random-img?m=proxy {IMAGE_INFO_HEADER_NAME} absent",
+            )
 
         if REDIRECT_ENABLED:
             redirect_any = self.expect_empty_status(

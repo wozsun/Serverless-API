@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+主路由端到端集成测试。
+
+测试流程：
+    1) / — 根路径应返回 404 及对应错误消息
+    2) /hello — 应返回 200 及 Hello 消息
+    3) /healthcheck — 应返回 200 及健康确认消息
+"""
 from __future__ import annotations
 
 import json
@@ -12,12 +20,27 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+
+# ===========================
+# 配置区
+# ===========================
+
+# 统一配置环境变量名（JSON 字符串）。
 CONFIG_ENV_NAME = "CONFIG"
+# 单次 HTTP 请求超时时间（秒）。
 TIMEOUT_SECONDS = 30
+# 瞬时网络/读取失败时的最大重试次数（不含首次请求）。
 MAX_NETWORK_RETRIES = 5
+# 线性退避基数（sleep = base * attempt）。
 RETRY_BACKOFF_BASE_SECONDS = 1
 
 
+# ===========================
+# 工具函数
+# ===========================
+
+
+# 期望路由的结构化描述：路径、HTTP 状态码、payload 内 status 字段和 message。
 @dataclass
 class ExpectedRoute:
     path: str
@@ -26,15 +49,18 @@ class ExpectedRoute:
     expected_message: str
 
 
+# 打印失败信息并立即终止测试。
 def fail(message: str) -> None:
     print(f"[FAIL] {message}")
     raise SystemExit(1)
 
 
+# 打印通过信息。
 def pass_log(message: str) -> None:
     print(f"[PASS] {message}")
 
 
+# 读取必需的环境变量，缺失时终止。
 def required_env(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
@@ -42,6 +68,7 @@ def required_env(name: str) -> str:
     return value
 
 
+# 从 CONFIG JSON 中提取 API_BASE_URL。
 def load_api_base_url_from_config() -> str:
     raw_config = required_env(CONFIG_ENV_NAME)
     try:
@@ -59,6 +86,12 @@ def load_api_base_url_from_config() -> str:
     return base_url.rstrip("/")
 
 
+# ===========================
+# 请求与断言
+# ===========================
+
+
+# 发送 GET 请求并解析 JSON 响应，网络异常时按次数重试。
 def request_json(base_url: str, path: str) -> tuple[int, Any]:
     url = f"{base_url}{path}"
     req = urllib.request.Request(url, method="GET")
@@ -106,6 +139,7 @@ def request_json(base_url: str, path: str) -> tuple[int, Any]:
     return status, payload
 
 
+# 对单条路由执行完整断言：HTTP 状态码、payload.status、payload.message。
 def assert_route(base_url: str, route: ExpectedRoute) -> None:
     status, payload = request_json(base_url, route.path)
 
@@ -131,6 +165,12 @@ def assert_route(base_url: str, route: ExpectedRoute) -> None:
     pass_log(f"{route.path} payload.message")
 
 
+# ===========================
+# 入口
+# ===========================
+
+
+# 初始化配置并依次断言所有主路由。
 def main() -> None:
     base_url = load_api_base_url_from_config()
     print("Testing main routes with CONFIG.API_BASE_URL")

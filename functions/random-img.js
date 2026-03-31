@@ -28,11 +28,16 @@ const METHOD_VALUES = ["proxy", "redirect"];
 const FETCH_MAX_ATTEMPTS = 3;
 // proxy 模式下重试间隔基数（毫秒），实际延迟 = 基数 × 当前重试次数。
 const FETCH_RETRY_DELAY_MS = 50;
+
+// 默认响应方式。
+const DEFAULT_METHOD = "proxy";
 // 是否允许 redirect 响应方式，关闭时强制回退为 proxy。
 const REDIRECT_ENABLED = true;
 
 // proxy 模式下是否返回 X-Image-Info 响应头（包含图片分组信息）。
 const IMAGE_INFO_HEADER_ENABLED = true;
+// proxy 模式下 X-Image-Info 响应头的名称。
+const IMAGE_INFO_HEADER_NAME = "X-Image-Info";
 
 // 是否启用 Referer 校验，关闭时跳过白名单检查。
 const REFERER_CHECK_ENABLED = false;
@@ -41,6 +46,8 @@ const ALLOW_EMPTY_REFERER = true;
 
 // 图片文件名数字位数，如 6 → 000001.webp。
 const IMAGE_FILENAME_DIGITS = 6;
+// 图片文件扩展名。
+const IMAGE_FILE_EXTENSION = ".webp";
 
 // 以下为上述数组的 Set 形式，用于 O(1) 查找。
 const ALLOWED_PARAMS_SET = new Set(ALLOWED_PARAMS);
@@ -164,7 +171,7 @@ const validateRefererByConfig = async (request) => {
 // 同时返回未补位的图片序号，供 X-Image-Info 响应头使用。
 const buildImageResult = (baseImageUrl, selectedFolder) => {
 	const imageNumber = Math.floor(Math.random() * selectedFolder.count) + 1;
-	const imageFilename = `${String(imageNumber).padStart(IMAGE_FILENAME_DIGITS, "0")}.webp`;
+	const imageFilename = `${String(imageNumber).padStart(IMAGE_FILENAME_DIGITS, "0")}${IMAGE_FILE_EXTENSION}`;
 	const url = `${baseImageUrl}${selectedFolder.device}-${selectedFolder.brightness}/${selectedFolder.theme}/${imageFilename}`;
 	const imageInfo = `${selectedFolder.device}-${selectedFolder.brightness}-${selectedFolder.theme}-${imageNumber}`;
 	return { url, imageInfo };
@@ -206,7 +213,7 @@ const respondImageByMethod = async (method, imageUrl, imageInfo) => {
 				headers: upstreamResponse.headers,
 			});
 			if (IMAGE_INFO_HEADER_ENABLED) {
-				response.headers.set("X-Image-Info", imageInfo);
+				response.headers.set(IMAGE_INFO_HEADER_NAME, imageInfo);
 			}
 			return response;
 		} catch {
@@ -257,7 +264,7 @@ export const handleRandomImg = async (request) => {
 	}
 
 	// 读取 method 参数，缺省时默认使用 proxy。
-	const method = params.get("m")?.toLowerCase() || "proxy";
+	const method = params.get("m")?.toLowerCase() || DEFAULT_METHOD;
 
 	// 校验 method 参数：仅允许 proxy 或 redirect。
 	if (!METHOD_SET.has(method)) {
