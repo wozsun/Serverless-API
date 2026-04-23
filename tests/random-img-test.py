@@ -91,7 +91,7 @@ REQUIRED_ERROR_COVERAGE_KEYS = {
     "THEME_CONFLICT",
 }
 # 受数据分布影响、可能缺失的错误类型。
-OPTIONAL_ERROR_COVERAGE_KEYS = {"NO_COMBO_IMAGES", "NO_IMAGES"}
+OPTIONAL_ERROR_COVERAGE_KEYS = {"NO_COMBO_IMAGES"}
 
 
 # 确保 URL 以 / 结尾，用于拼接资源路径。
@@ -239,7 +239,6 @@ class ApiTester:
             "BAD_THEME": False,
             "THEME_CONFLICT": False,
             "NO_COMBO_IMAGES": False,
-            "NO_IMAGES": False,
         }
         self.passed = 0
         self.failed = 0
@@ -428,8 +427,6 @@ class ApiTester:
             self.error_coverage["THEME_CONFLICT"] = True
         elif "No available images for the selected filters" in message:
             self.error_coverage["NO_COMBO_IMAGES"] = True
-        elif "No available images" in message:
-            self.error_coverage["NO_IMAGES"] = True
 
     # 校验错误响应的 JSON 结构：content-type、status、message 字段。
     def _assert_error_json_payload(
@@ -1375,7 +1372,6 @@ class ApiTester:
                 404,
                 "No available images for the selected filters",
                 "theme exclude all → no images",
-                expected_detail_keys=["filters"],
             )
         else:
             print("[SKIP] 不存在多主题组合，跳过主题排除功能断言")
