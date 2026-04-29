@@ -30,6 +30,8 @@ const METHOD_VALUES = ["proxy", "redirect"];
 const FETCH_MAX_ATTEMPTS = 3;
 // proxy 模式下重试间隔基数（毫秒），实际延迟 = 基数 × 当前重试次数
 const FETCH_RETRY_DELAY_MS = 50;
+// 代理模式下可重试的临时上游 HTTP 状态码
+const RETRYABLE_UPSTREAM_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 // 默认响应方式
 const DEFAULT_METHOD = "proxy";
@@ -203,11 +205,18 @@ const respondImageByMethod = async (method, imageUrl, imageInfo) => {
 		try {
 			const upstreamResponse = await fetch(imageUrl);
 
-			// 上游返回非 2xx 状态码，立即返回错误
+			// 上游返回非 2xx 状态码：临时状态重试，其他状态立即返回错误
 			if (!upstreamResponse.ok) {
+				if (
+					RETRYABLE_UPSTREAM_STATUS_CODES.has(upstreamResponse.status) &&
+					attempt < FETCH_MAX_ATTEMPTS
+				) {
+					await new Promise((resolve) => setTimeout(resolve, FETCH_RETRY_DELAY_MS * attempt));
+					continue;
+				}
+
 				return jsonErrorResponse(ERRORS.UPSTREAM_STATUS, {
 					upstreamStatus: upstreamResponse.status,
-					upstreamStatusText: upstreamResponse.statusText || undefined,
 					hint: "Upstream responded but did not return a success status",
 				});
 			}
