@@ -6,7 +6,7 @@ import * as randomImgHandlers from "../functions/random-img.js";
 // 可配置参数（优先编辑此区域）
 // ===========================
 
-const HIDDEN_ROUTES_NAMESPACE = "hidden-routes";
+const HIDDEN_ROUTES_NAMESPACE = "hidden_routes";
 // 隐藏路由入口注册：新增隐藏路由时仅需在此追加 KV key 字符串。
 const HIDDEN_PATH_KEYS = ["RANDOM_IMG_COUNT_PATH"];
 

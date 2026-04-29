@@ -7,7 +7,7 @@ import { validateRefererAccess } from "../commons/referer.js";
 // ===========================
 
 // KV 命名空间名称
-const RANDOM_IMG_CONFIG_NAMESPACE = "random-img-config";
+const RANDOM_IMG_CONFIG_NAMESPACE = "random_img_config";
 // KV 中 FOLDER_MAP 的键名，值为设备-亮度-主题到图片数量的映射 JSON
 const FOLDER_MAP_KEY = "FOLDER_MAP";
 // KV 中基础图片 URL 的键名，用于拼接最终图片地址
