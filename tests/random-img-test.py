@@ -163,8 +163,8 @@ SENSITIVE_LOG_TOKENS = sorted(
 # 重定向地址格式校验正则（基于 ASSET_BASE_URL 做完整 URL 校验）。
 REDIRECT_LOCATION_PATTERN = rf"^{re.escape(ASSET_BASE_URL)}(pc|mb)-(dark|light)/[a-z0-9_-]+/\d{{{IMAGE_FILENAME_DIGITS}}}\.webp$"
 
-# X-Image-Info 响应头格式校验正则：{device}-{brightness}-{theme}-{imageNumber}
-IMAGE_INFO_HEADER_PATTERN = re.compile(r"^(pc|mb)-(dark|light)-[a-z0-9_-]+-\d+$")
+# X-Image-Info 响应头格式校验正则：{device}-{brightness}-{theme}-{imageNumber}; {ms}
+IMAGE_INFO_HEADER_PATTERN = re.compile(r"^(pc|mb)-(dark|light)-[a-z0-9_-]+-\d+; \d+$")
 
 
 # ===========================
