@@ -2,6 +2,7 @@ import { getKvJsonObjectCached, getKvUrlCached } from "../commons/kv.js";
 import { jsonErrorResponse, jsonSuccessResponse } from "../commons/response.js";
 import { validateRefererAccess } from "../commons/referer.js";
 
+
 // ===========================
 // 随机图片 API 配置
 // ===========================
@@ -64,6 +65,7 @@ const METHOD_SET = new Set(METHOD_VALUES);
 // ===========================
 // 随机图片 API 错误定义
 // ===========================
+
 const ERRORS = {
 	// 非法查询参数键
 	BAD_PARAMS: { status: 400, message: "Bad Request: Invalid query parameters" },
@@ -251,6 +253,7 @@ const respondImageByMethod = async (method, imageUrl, imageInfo) => {
 // 随机图片主处理逻辑
 // 处理随机图片请求：参数校验 -> 候选组合筛选 -> 加权抽样 -> redirect/proxy 返回
 // ===========================
+
 export const handleRandomImg = async (request, env) => {
 	// 仅允许 GET 请求，其余方法返回 405
 	if (request.method !== "GET") {
@@ -451,6 +454,11 @@ export const handleRandomImg = async (request, env) => {
 	const { url: imageUrl, imageInfo } = buildImageResult(baseImageUrl, selectedFolder);
 	return await respondImageByMethod(effectiveMethod, imageUrl, imageInfo);
 };
+
+
+// ===========================
+// 隐藏路由-统计数据
+// ===========================
 
 // 汇总 FOLDER_MAP 中的图片数量：按设备-亮度组合分组、按主题聚合、并计算总数
 const buildRandomImgCountData = (folderMap) => {

@@ -6,7 +6,7 @@ const withForcedEoProvider = (env = {}) => ({
 });
 
 // EdgeOne 只负责把命中的平台路由转交给通用 app，由 app 继续处理业务路由。
-export default async function onRequest(context) {
+export async function handleEdgeOneRequest(context) {
 	const request = context?.request;
 	const env = context?.env;
 
