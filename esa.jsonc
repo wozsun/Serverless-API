@@ -1,6 +1,6 @@
 {
-    "name": "api",
-    "entry": "./app/index.js",
+    "name": "wozsun-api",
+    "entry": "app/index.js",
     "installCommand": null,
     "buildCommand": null
 }

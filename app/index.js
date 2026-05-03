@@ -3,7 +3,7 @@ import { jsonErrorResponse, jsonSuccessResponse } from "../commons/response.js";
 import * as randomImgHandlers from "../functions/random-img.js";
 
 // ===========================
-// 可配置参数（优先编辑此区域）
+// 路由配置
 // ===========================
 
 const HIDDEN_ROUTES_NAMESPACE = "hidden_routes";
@@ -19,6 +19,10 @@ const ROUTES = {
 	"/healthcheck": async () => jsonSuccessResponse({ message: "API on EdgeFunction is healthy" }),
 	"/random-img": randomImgHandlers,
 };
+
+// ===========================
+// 路由处理器自动解析逻辑
+// ===========================
 
 const routeHandlerCache = new Map();
 let hiddenHandlerMapPromise = null;
@@ -120,11 +124,12 @@ const resolveHiddenHandler = async (kvPathKey) => {
 };
 
 // 命中隐藏路径时返回对应响应，未命中返回 null。
-const resolveHiddenPathRoute = async (url, request) => {
+const resolveHiddenPathRoute = async (url, request, env) => {
 	const { pathname, search } = url;
 
 	for (const pathKey of HIDDEN_PATH_KEYS) {
 		const dynamicPath = await getKvTextCached({
+			env,
 			namespace: HIDDEN_ROUTES_NAMESPACE,
 			key: pathKey,
 			cacheKey: `hidden-routes::${pathKey}`,
@@ -137,7 +142,7 @@ const resolveHiddenPathRoute = async (url, request) => {
 
 			const handler = await resolveHiddenHandler(pathKey);
 			if (handler) {
-				return await handler(request);
+				return await handler(request, env);
 			}
 
 			return jsonErrorResponse({ status: 500, message: "Internal Server Error: Route handler is not configured" });
@@ -150,19 +155,20 @@ const resolveHiddenPathRoute = async (url, request) => {
 // ===========================
 // 边缘函数入口
 // ===========================
+
 export default {
 	// 边缘函数主入口：按 pathname 分发路由并兜底处理未捕获异常。
-	async fetch(request) {
+	async fetch(request, env) {
 		try {
 			const url = new URL(request.url);
 			const { pathname } = url;
 			const handler = await resolveRouteHandler(pathname);
 
 			if (handler) {
-				return await handler(request);
+				return await handler(request, env);
 			}
 
-			const hiddenPathResponse = await resolveHiddenPathRoute(url, request);
+			const hiddenPathResponse = await resolveHiddenPathRoute(url, request, env);
 			if (hiddenPathResponse) {
 				return hiddenPathResponse;
 			}

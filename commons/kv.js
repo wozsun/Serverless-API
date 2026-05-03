@@ -1,3 +1,5 @@
+import { getKvClient } from "./kv-providers.js";
+
 // ===========================
 // KV 常量
 // ===========================
@@ -12,20 +14,6 @@ const KV_GET_MAX_ATTEMPTS = 5;
 const KV_RETRY_BASE_DELAY_MS = 50;
 
 // ===========================
-// KV 客户端
-// ===========================
-
-const edgeKVClients = new Map();
-
-// 按 namespace 获取 EdgeKV 客户端（懒初始化并复用）
-const getEdgeKVClient = (namespace) => {
-	if (!edgeKVClients.has(namespace)) {
-		edgeKVClients.set(namespace, new EdgeKV({ namespace }));
-	}
-	return edgeKVClients.get(namespace);
-};
-
-// ===========================
 // 缓存核心
 // ===========================
 
@@ -37,11 +25,13 @@ const cacheStores = {
 	text: new Map(),
 	textLines: new Map(),
 	url: new Map(),
-	urlLines: new Map(),
 };
 
-// 生成缓存键：优先使用自定义 cacheKey，否则使用 namespace + key
-const buildCacheKey = (namespace, key, cacheKey) => cacheKey || `${namespace}::${key}`;
+// 生成缓存键：按 provider 隔离缓存，再优先使用自定义 cacheKey。
+const buildCacheKey = (env, namespace, key, cacheKey) => {
+	const provider = String(env?.KV_PROVIDER || "ESA").toUpperCase();
+	return `${provider}::${cacheKey || `${namespace}::${key}`}`;
+};
 
 // 读取缓存值：存在且未过期则命中
 const readCache = (cacheStore, id) => {
@@ -113,11 +103,16 @@ const toSingleLine = (payload) => {
 	return payload.lines[0];
 };
 
-// 从 KV 按指定 type 拉取数据，失败时按上限重试；key 不存在或异常均返回 null
-const fetchFromKv = async ({ namespace, key, type }) => {
+// 从当前运行平台的 KV 按指定 type 拉取数据，失败时按上限重试；key 不存在或异常均返回 null。
+const fetchFromKv = async ({ env, namespace, key, type }) => {
+	const kvClient = getKvClient({ env, namespace });
+	if (!kvClient || typeof kvClient.get !== "function") {
+		return null;
+	}
+
 	for (let attempt = 1; attempt <= KV_GET_MAX_ATTEMPTS; attempt++) {
 		try {
-			const value = await getEdgeKVClient(namespace).get(key, { type });
+			const value = await kvClient.get(key, { type });
 			return value ?? null;
 		} catch {
 			if (attempt >= KV_GET_MAX_ATTEMPTS) {
@@ -132,17 +127,18 @@ const fetchFromKv = async ({ namespace, key, type }) => {
 
 // 带缓存获取归一化后的源数据载荷
 const getNormalizedSourceCached = async ({
+	env,
 	namespace,
 	key,
 	cacheKey = "",
 	ttlMs = KV_CACHE_TTL_MS,
 }) => {
-	const id = buildCacheKey(namespace, key, cacheKey);
+	const id = buildCacheKey(env, namespace, key, cacheKey);
 	return readCachedValue({
 		cacheStore: cacheStores.raw,
 		id,
 		ttlMs,
-		loader: async () => normalizeRawText(await fetchFromKv({ namespace, key, type: "text" })),
+		loader: async () => normalizeRawText(await fetchFromKv({ env, namespace, key, type: "text" })),
 	});
 };
 
@@ -194,22 +190,6 @@ const parseUrl = (line) => {
 	}
 };
 
-// 解析并规范化多行 URL
-const parseUrlLines = (lines) => {
-	if (!lines) {
-		return null;
-	}
-	const urls = [];
-	for (const line of lines) {
-		const url = parseUrl(line);
-		if (!url) {
-			return null;
-		}
-		urls.push(url);
-	}
-	return urls.length > 0 ? urls : null;
-};
-
 // ===========================
 // Getter 工厂
 // ===========================
@@ -230,14 +210,14 @@ const pickSource = (payload, sourceType) => {
 
 // 构建类型化 KV Getter：组合 source 提取、严格解析和独立缓存
 const createTypedKvGetter = ({ cacheStore, sourceType, parser }) => {
-	return async ({ namespace, key, cacheKey = "", ttlMs = KV_CACHE_TTL_MS }) => {
-		const id = buildCacheKey(namespace, key, cacheKey);
+	return async ({ env, namespace, key, cacheKey = "", ttlMs = KV_CACHE_TTL_MS }) => {
+		const id = buildCacheKey(env, namespace, key, cacheKey);
 		return readCachedValue({
 			cacheStore,
 			id,
 			ttlMs,
 			loader: async () => {
-				const payload = await getNormalizedSourceCached({ namespace, key, cacheKey, ttlMs });
+				const payload = await getNormalizedSourceCached({ env, namespace, key, cacheKey, ttlMs });
 				const source = pickSource(payload, sourceType);
 				return parser(source);
 			},
@@ -257,13 +237,13 @@ export const getKvBooleanCached = createTypedKvGetter({
 });
 
 // 2) JSON 对象（通过 type:"json" 直接获取，不做本地校验与类型转换）
-export const getKvJsonObjectCached = async ({ namespace, key, cacheKey = "", ttlMs = KV_CACHE_TTL_MS }) => {
-	const id = buildCacheKey(namespace, key, cacheKey);
+export const getKvJsonObjectCached = async ({ env, namespace, key, cacheKey = "", ttlMs = KV_CACHE_TTL_MS }) => {
+	const id = buildCacheKey(env, namespace, key, cacheKey);
 	return readCachedValue({
 		cacheStore: cacheStores.jsonObject,
 		id,
 		ttlMs,
-		loader: () => fetchFromKv({ namespace, key, type: "json" }),
+		loader: () => fetchFromKv({ env, namespace, key, type: "json" }),
 	});
 };
 
@@ -294,11 +274,3 @@ export const getKvUrlCached = createTypedKvGetter({
 	sourceType: "line",
 	parser: parseUrl,
 });
-
-// 7) 多行 URL
-export const getKvUrlLinesCached = createTypedKvGetter({
-	cacheStore: cacheStores.urlLines,
-	sourceType: "lines",
-	parser: parseUrlLines,
-});
-

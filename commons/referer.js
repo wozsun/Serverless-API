@@ -29,8 +29,9 @@ const buildConfigErrorResponse = () =>
 	jsonErrorResponse(REFERER_ERRORS.ALLOWED_REFERER_CONFIG_ERROR);
 
 // 读取指定 namespace 下的允许 Referer 列表。
-const loadAllowedReferer = (namespace) =>
+const loadAllowedReferer = (env, namespace) =>
 	getKvTextLinesCached({
+		env,
 		namespace,
 		key: ALLOWED_REFERER_KEY,
 		cacheKey: `${namespace}::allowed-referer`,
@@ -71,7 +72,7 @@ const matchRefererPattern = (refererOrigin, pattern) => {
 };
 
 // 通用 Referer 校验流程：请求头校验 -> 配置读取校验 -> 白名单匹配。
-export const validateRefererAccess = async ({ namespace, referer = "", allowEmptyReferer = false }) => {
+export const validateRefererAccess = async ({ env, namespace, referer = "", allowEmptyReferer = false }) => {
 	if (!referer) {
 		if (allowEmptyReferer) {
 			return { allowed: true, response: null };
@@ -90,7 +91,7 @@ export const validateRefererAccess = async ({ namespace, referer = "", allowEmpt
 		};
 	}
 
-	const allowedReferer = await loadAllowedReferer(namespace);
+	const allowedReferer = await loadAllowedReferer(env, namespace);
 	if (!allowedReferer) {
 		return {
 			allowed: false,

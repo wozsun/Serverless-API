@@ -1,0 +1,22 @@
+{
+  "name": "wozsun-api",
+  "main": "app/index.js",
+  "compatibility_date": "2026-05-03",
+
+  // Cloudflare Workers KV mode
+  "vars": {
+    "KV_PROVIDER": "CF"
+  },
+
+  // KV namespaces. Make sure to replace the "id" with your actual KV namespace ID.
+  "kv_namespaces": [
+    {
+      "binding": "hidden_routes",
+      "id": "c48c237cd87e4301b562af506a74fdb3"
+    },
+    {
+      "binding": "random_img_config",
+      "id": "1eb615e1c5724a0a90f260eeb27345d2"
+    }
+  ]
+}

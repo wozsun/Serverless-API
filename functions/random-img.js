@@ -158,8 +158,9 @@ const ensureValidThemeCache = (folderMap) => {
 };
 
 // 读取并校验 FOLDER_MAP 配置
-const getFolderMapFromKV = async () => {
+const getFolderMapFromKV = async (env) => {
 	return getKvJsonObjectCached({
+		env,
 		namespace: RANDOM_IMG_CONFIG_NAMESPACE,
 		key: FOLDER_MAP_KEY,
 		cacheKey: "random-img::folder-map",
@@ -167,13 +168,14 @@ const getFolderMapFromKV = async () => {
 };
 
 // 按全局开关决定是否执行 Referer 校验，关闭时直接放行
-const validateRefererByConfig = async (request) => {
+const validateRefererByConfig = async (request, env) => {
 	// Referer 校验未启用时直接放行
 	if (!REFERER_CHECK_ENABLED) {
 		return { allowed: true, response: null };
 	}
 
 	return validateRefererAccess({
+		env,
 		namespace: RANDOM_IMG_CONFIG_NAMESPACE,
 		referer: request.headers.get("referer") || "",
 		allowEmptyReferer: ALLOW_EMPTY_REFERER,
@@ -249,13 +251,13 @@ const respondImageByMethod = async (method, imageUrl, imageInfo) => {
 // 随机图片主处理逻辑
 // 处理随机图片请求：参数校验 -> 候选组合筛选 -> 加权抽样 -> redirect/proxy 返回
 // ===========================
-export const handleRandomImg = async (request) => {
+export const handleRandomImg = async (request, env) => {
 	// 仅允许 GET 请求，其余方法返回 405
 	if (request.method !== "GET") {
 		return jsonErrorResponse({ status: 405, message: "Method Not Allowed" });
 	}
 
-	const refererCheckResult = await validateRefererByConfig(request);
+	const refererCheckResult = await validateRefererByConfig(request, env);
 	if (!refererCheckResult.allowed) {
 		return refererCheckResult.response;
 	}
@@ -296,6 +298,15 @@ export const handleRandomImg = async (request) => {
 	// 强制开关：若关闭 redirect，则无论参数如何都用 proxy
 	const effectiveMethod = REDIRECT_ENABLED ? method : "proxy";
 
+	// 读取亮度参数（若未传则为 null）
+	const requestedBrightness = params.get("b")?.toLowerCase() || null;
+	// 校验亮度参数合法性（允许 dark / light）
+	if (requestedBrightness && !BRIGHTNESS_SET.has(requestedBrightness)) {
+		return jsonErrorResponse(ERRORS.BAD_BRIGHTNESS, { field: "b" });
+	}
+	// 构建亮度候选列表：指定时仅用该值，否则使用全部亮度
+	const brightnessCandidates = requestedBrightness ? [requestedBrightness] : BRIGHTNESS_VALUES;
+
 	// 读取请求指定的设备参数（若未传则为 null）
 	const requestedDevice = params.get("d")?.toLowerCase() || null;
 	// 校验设备参数合法性（允许 pc / mb / r）
@@ -317,15 +328,6 @@ export const handleRandomImg = async (request) => {
 		device === "r"
 			? MAP_DEVICES
 			: [device];
-
-	// 读取亮度参数（若未传则为 null）
-	const requestedBrightness = params.get("b")?.toLowerCase() || null;
-	// 校验亮度参数合法性（允许 dark / light）
-	if (requestedBrightness && !BRIGHTNESS_SET.has(requestedBrightness)) {
-		return jsonErrorResponse(ERRORS.BAD_BRIGHTNESS, { field: "b" });
-	}
-	// 构建亮度候选列表：指定时仅用该值，否则使用全部亮度
-	const brightnessCandidates = requestedBrightness ? [requestedBrightness] : BRIGHTNESS_VALUES;
 
 	// 读取并归一化 theme 参数：支持多次传参与逗号分隔，最终统一小写并去重
 	const rawThemeValues = Array.from(new Set(params
@@ -349,8 +351,9 @@ export const handleRandomImg = async (request) => {
 
 	// 并行读取 FOLDER_MAP 与 BASE_IMAGE_URL 配置（两者互不依赖）
 	const [folderMap, baseImageUrl] = await Promise.all([
-		getFolderMapFromKV(),
+		getFolderMapFromKV(env),
 		getKvUrlCached({
+			env,
 			namespace: RANDOM_IMG_CONFIG_NAMESPACE,
 			key: BASE_IMAGE_URL_KEY,
 			cacheKey: "random-img::base-image-url",
@@ -493,8 +496,8 @@ const buildRandomImgCountData = (folderMap) => {
 };
 
 // 处理图片数量统计请求：读取 FOLDER_MAP 并返回汇总统计数据
-export const handleRandomImgCount = async () => {
-	const folderMap = await getFolderMapFromKV();
+export const handleRandomImgCount = async (_request, env) => {
+	const folderMap = await getFolderMapFromKV(env);
 	// 配置缺失时返回错误
 	if (!folderMap) {
 		return jsonErrorResponse(ERRORS.BAD_FOLDER_MAP);
