@@ -333,15 +333,26 @@ export const handleRandomImg = async (request, env) => {
 			: [device];
 
 	// 读取并归一化 theme 参数：支持多次传参与逗号分隔，最终统一小写并去重
-	const rawThemeValues = Array.from(new Set(params
+	const normalizedThemeValues = Array.from(new Set(params
 		.getAll("t")
 		.flatMap((value) => value.split(","))
 		.map((value) => value.trim().toLowerCase())
 		.filter(Boolean)));
 
 	// 以 ! 为前缀的值表示排除该主题，不带前缀为包含，两者不可混用
-	const themeIncludes = rawThemeValues.filter((v) => !v.startsWith("!"));
-	const themeExcludes = rawThemeValues.filter((v) => v.startsWith("!")).map((v) => v.slice(1)).filter(Boolean);
+	const themeIncludes = [];
+	const themeExcludes = [];
+	for (const value of normalizedThemeValues) {
+		if (value.startsWith("!")) {
+			const excludedTheme = value.slice(1);
+			if (excludedTheme) {
+				themeExcludes.push(excludedTheme);
+			}
+			continue;
+		}
+
+		themeIncludes.push(value);
+	}
 
 	// 包含与排除不可混用，同时存在时返回冲突错误
 	if (themeIncludes.length > 0 && themeExcludes.length > 0) {
