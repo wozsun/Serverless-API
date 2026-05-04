@@ -100,10 +100,31 @@ random_img_config
 }
 ```
 
-图片最终路径格式：
+图片 URL 的路径部分不从 KV 读取，而是在 [functions/random-img.js](./functions/random-img.js) 顶部配置区设置：
 
-```text
-{BASE_IMAGE_URL}{device}-{brightness}/{theme}/{number}.webp
+```js
+const IMAGE_INDEX_DIGITS = 6;
+const IMAGE_FILE_EXTENSION = ".webp";
+const IMAGE_PATH_PATTERN = "{device}-{brightness}/{theme}/{index}";
+```
+
+最终 URL = `BASE_IMAGE_URL` + 渲染后的 `IMAGE_PATH_PATTERN` + `IMAGE_FILE_EXTENSION`。
+
+可用占位符：
+
+| 占位符 | 说明 |
+| --- | --- |
+| `{device}` | 设备值，例如 `pc` / `mb` |
+| `{brightness}` | 亮度值，例如 `dark` / `light` |
+| `{theme}` | 主题名 |
+| `{index}` | 补零后的图片索引，例如 `000001` |
+
+如果图片目录结构不同，只需要改 `IMAGE_PATH_PATTERN`，例如：
+
+```js
+const IMAGE_PATH_PATTERN = "{device}/{brightness}/{theme}/{index}";
+const IMAGE_PATH_PATTERN = "{device}-{brightness}/{theme}-{index}";
+const IMAGE_PATH_PATTERN = "{theme}/{device}-{brightness}/{index}";
 ```
 
 例如：
@@ -261,6 +282,8 @@ $env:CONFIG='{"API_BASE_URL":"https://api.example.com","ASSET_BASE_URL":"https:/
 python tests/main-test.py
 python tests/random-img-test.py
 ```
+
+如果修改了 [functions/random-img.js](./functions/random-img.js) 顶部的 `IMAGE_INDEX_DIGITS`、`IMAGE_PATH_PATTERN` 或 `IMAGE_FILE_EXTENSION`，请同步修改 [tests/random-img-test.py](./tests/random-img-test.py) 顶部同名常量，用于校验 redirect 的 `Location` 格式。
 
 ## 目录结构
 

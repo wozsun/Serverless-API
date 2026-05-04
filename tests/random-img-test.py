@@ -64,8 +64,12 @@ REDIRECT_ENABLED = True
 IMAGE_INFO_HEADER_ENABLED = True
 # proxy 模式下图片信息响应头名称。
 IMAGE_INFO_HEADER_NAME = "X-Image-Info"
-# 图片文件名数字位数（例如 6 -> 000001.webp）。
-IMAGE_FILENAME_DIGITS = 6
+# 图片索引数字位数（例如 6 -> 000001）。
+IMAGE_INDEX_DIGITS = 6
+# 图片文件扩展名。
+IMAGE_FILE_EXTENSION = ".webp"
+# 图片路径模板，需与 functions/random-img.js 中的 IMAGE_PATH_PATTERN 保持一致。
+IMAGE_PATH_PATTERN = "{device}-{brightness}/{theme}/{index}"
 # 5xx 响应最大重试次数（不含首次请求）。
 MAX_HTTP_5XX_RETRIES = 5
 # 瞬时网络/读取失败时的最大重试次数（不含首次请求）。
@@ -82,21 +86,37 @@ SUPPORTED_BRIGHTNESS = {"dark", "light"}
 
 # 一次完整测试中必须覆盖到的错误类型。
 REQUIRED_ERROR_COVERAGE_KEYS = {
-    "BAD_PARAMS",
+    "INVALID_QUERY_PARAMS",
     "DUPLICATE_PARAM",
-    "BAD_DEVICE",
-    "BAD_BRIGHTNESS",
-    "BAD_METHOD",
-    "BAD_THEME",
+    "INVALID_DEVICE",
+    "INVALID_BRIGHTNESS",
+    "INVALID_METHOD",
+    "INVALID_THEME",
     "THEME_CONFLICT",
 }
 # 受数据分布影响、可能缺失的错误类型。
-OPTIONAL_ERROR_COVERAGE_KEYS = {"NO_COMBO_IMAGES"}
+OPTIONAL_ERROR_COVERAGE_KEYS = {"NO_IMAGES_FOR_COMBINATION"}
 
 
 # 确保 URL 以 / 结尾，用于拼接资源路径。
 def _normalize_asset_base_url(url: str) -> str:
     return url.rstrip("/") + "/"
+
+
+# 将图片路径模板转换成 redirect Location 的正则片段。
+def _image_path_pattern_to_regex(pattern: str) -> str:
+    token_patterns = {
+        "device": r"(pc|mb)",
+        "brightness": r"(dark|light)",
+        "theme": r"[a-z0-9_-]+",
+        "index": rf"\d{{{IMAGE_INDEX_DIGITS}}}",
+    }
+
+    normalized_pattern = str(pattern).strip().lstrip("/")
+    escaped_pattern = re.escape(normalized_pattern)
+    for token, token_pattern in token_patterns.items():
+        escaped_pattern = escaped_pattern.replace(re.escape(f"{{{token}}}"), token_pattern)
+    return escaped_pattern
 
 
 # 解析 CONFIG JSON 字符串为字典，格式异常时抛出。
@@ -147,6 +167,7 @@ ASSET_BASE_URL = _normalize_asset_base_url(
 RANDOM_IMG_COUNT_PATH = "/" + _required_config_str(
     CONFIG, "RANDOM_IMG_COUNT_PATH"
 ).strip("/")
+IMAGE_PATH_PATTERN = str(IMAGE_PATH_PATTERN).strip().lstrip("/")
 
 HIDDEN_ROUTE_QUERY_FORBIDDEN_MESSAGE_PART = "Routes do not accept query parameters"
 
@@ -160,10 +181,10 @@ SENSITIVE_LOG_TOKENS = sorted(
     reverse=True,
 )
 
-# 重定向地址格式校验正则（基于 ASSET_BASE_URL 做完整 URL 校验）。
-REDIRECT_LOCATION_PATTERN = rf"^{re.escape(ASSET_BASE_URL)}(pc|mb)-(dark|light)/[a-z0-9_-]+/\d{{{IMAGE_FILENAME_DIGITS}}}\.webp$"
+# 重定向地址格式校验正则（基于 ASSET_BASE_URL、IMAGE_PATH_PATTERN 与 IMAGE_FILE_EXTENSION 做完整 URL 校验）。
+REDIRECT_LOCATION_PATTERN = rf"^{re.escape(ASSET_BASE_URL)}{_image_path_pattern_to_regex(IMAGE_PATH_PATTERN)}{re.escape(IMAGE_FILE_EXTENSION)}$"
 
-# X-Image-Info 响应头格式校验正则：{device}-{brightness}-{theme}-{imageNumber}; {ms}
+# X-Image-Info 响应头格式校验正则：{device}-{brightness}-{theme}-{imageIndex}; {ms}
 IMAGE_INFO_HEADER_PATTERN = re.compile(r"^(pc|mb)-(dark|light)-[a-z0-9_-]+-\d+; \d+$")
 
 
@@ -231,14 +252,14 @@ class ApiTester:
         self.timeout = timeout
         self.random_runs = random_runs
         self.error_coverage: dict[str, bool] = {
-            "BAD_PARAMS": False,
+            "INVALID_QUERY_PARAMS": False,
             "DUPLICATE_PARAM": False,
-            "BAD_DEVICE": False,
-            "BAD_BRIGHTNESS": False,
-            "BAD_METHOD": False,
-            "BAD_THEME": False,
+            "INVALID_DEVICE": False,
+            "INVALID_BRIGHTNESS": False,
+            "INVALID_METHOD": False,
+            "INVALID_THEME": False,
             "THEME_CONFLICT": False,
-            "NO_COMBO_IMAGES": False,
+            "NO_IMAGES_FOR_COMBINATION": False,
         }
         self.passed = 0
         self.failed = 0
@@ -412,21 +433,21 @@ class ApiTester:
     # 根据错误消息关键词标记已覆盖的错误类型，用于最终覆盖率检查。
     def _mark_error_coverage(self, message: str) -> None:
         if "Invalid query parameters" in message:
-            self.error_coverage["BAD_PARAMS"] = True
+            self.error_coverage["INVALID_QUERY_PARAMS"] = True
         elif "Duplicate query parameter" in message:
             self.error_coverage["DUPLICATE_PARAM"] = True
         elif "Invalid device" in message:
-            self.error_coverage["BAD_DEVICE"] = True
+            self.error_coverage["INVALID_DEVICE"] = True
         elif "Invalid brightness" in message:
-            self.error_coverage["BAD_BRIGHTNESS"] = True
+            self.error_coverage["INVALID_BRIGHTNESS"] = True
         elif "Invalid method" in message:
-            self.error_coverage["BAD_METHOD"] = True
+            self.error_coverage["INVALID_METHOD"] = True
         elif "Invalid theme" in message:
-            self.error_coverage["BAD_THEME"] = True
+            self.error_coverage["INVALID_THEME"] = True
         elif "Cannot mix include and exclude" in message:
             self.error_coverage["THEME_CONFLICT"] = True
         elif "No available images for the selected filters" in message:
-            self.error_coverage["NO_COMBO_IMAGES"] = True
+            self.error_coverage["NO_IMAGES_FOR_COMBINATION"] = True
 
     # 校验错误响应的 JSON 结构：content-type、status、message 字段。
     def _assert_error_json_payload(
@@ -562,6 +583,7 @@ class ApiTester:
         print(
             f"Expect asset base URL: {_mask_url_for_log(self.asset_base_url)} (strict=True)"
         )
+        print(f"Expect image path pattern: {IMAGE_PATH_PATTERN}{IMAGE_FILE_EXTENSION}")
         print(f"Expect actual redirect behavior: {REDIRECT_ENABLED}")
         started = time.time()
 
@@ -1282,7 +1304,7 @@ class ApiTester:
         else:
             print("[SKIP] 不足 2 个主题，跳过主题包含排除混用断言")
 
-        # 8.5.2) 排除不存在的主题 → 400 BAD_THEME
+        # 8.5.2) 排除不存在的主题 → 400 INVALID_THEME
         self.expect_json_error(
             "/random-img",
             {"t": "!__nonexistent_theme__"},
@@ -1364,7 +1386,7 @@ class ApiTester:
             else:
                 print("[SKIP] 不足 3 个可用主题，跳过重复参数多主题排除断言")
 
-            # 8.5.6) 排除全部主题 → 404 NO_COMBO_IMAGES
+            # 8.5.6) 排除全部主题 → 404 NO_IMAGES_FOR_COMBINATION
             all_exclude_csv = ",".join(f"!{t}" for t in themes)
             self.expect_json_error(
                 "/random-img",
