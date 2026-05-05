@@ -42,6 +42,15 @@ GET /random-img
 | `t` | 主题名或 `!主题名` | 主题筛选。支持逗号分隔和重复参数，例如 `t=a,b` 或 `t=a&t=b`。以 `!` 开头表示排除主题，包含与排除不能混用 |
 | `m` | `proxy` / `redirect` | 响应方式。默认 `proxy` |
 
+查询参数白名单与单值约束在 [functions/random-img/config.js](./functions/random-img/config.js) 中配置：
+
+```js
+const ALLOWED_QUERY = ["d", "b", "t", "m"];
+const SINGLE_VALUE_QUERY = ["d", "b", "m"];
+```
+
+其中 `t` 不在 `SINGLE_VALUE_QUERY` 中，因此允许重复传入。
+
 示例：
 
 ```text

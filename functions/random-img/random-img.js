@@ -4,8 +4,8 @@ import { jsonErrorResponse, jsonSuccessResponse } from "../../commons/response.j
 import { validateRefererAccess } from "../../commons/referer.js";
 
 // 将数组转为 Set，用于 O(1) 校验
-const ALLOWED_PARAMS_SET = new Set(CONFIG.ALLOWED_PARAMS);
-const SINGLE_VALUE_PARAMS_SET = new Set(CONFIG.SINGLE_VALUE_PARAMS);
+const ALLOWED_QUERY_SET = new Set(CONFIG.ALLOWED_QUERY);
+const SINGLE_VALUE_QUERY_SET = new Set(CONFIG.SINGLE_VALUE_QUERY);
 const REQUEST_DEVICE_SET = new Set(CONFIG.REQUEST_DEVICES);
 const BRIGHTNESS_SET = new Set(CONFIG.BRIGHTNESS_VALUES);
 const METHOD_SET = new Set(CONFIG.METHOD_VALUES);
@@ -18,12 +18,12 @@ let validThemeCache = {
 };
 
 // 检查请求的查询参数是否均在允许列表内
-const validateAllowedQueryParams = (params) => {
-	for (const key of params.keys()) {
-		if (!ALLOWED_PARAMS_SET.has(key)) {
-			return jsonErrorResponse(CONFIG.ERRORS.INVALID_QUERY_PARAMS, {
-				invalidParams: [key],
-				allowedParams: CONFIG.ALLOWED_PARAMS,
+const validateAllowedQuery = (query) => {
+	for (const key of query.keys()) {
+		if (!ALLOWED_QUERY_SET.has(key)) {
+			return jsonErrorResponse(CONFIG.ERRORS.INVALID_QUERY, {
+				invalidQuery: [key],
+				allowedQuery: CONFIG.ALLOWED_QUERY,
 			});
 		}
 	}
@@ -31,10 +31,10 @@ const validateAllowedQueryParams = (params) => {
 };
 
 // 检查单值参数是否存在重复
-const validateSingleValueParams = (params) => {
-	for (const key of params.keys()) {
-		if (SINGLE_VALUE_PARAMS_SET.has(key) && params.getAll(key).length > 1) {
-			return jsonErrorResponse(CONFIG.ERRORS.DUPLICATE_PARAM, {
+const validateSingleValueQuery = (query) => {
+	for (const key of query.keys()) {
+		if (SINGLE_VALUE_QUERY_SET.has(key) && query.getAll(key).length > 1) {
+			return jsonErrorResponse(CONFIG.ERRORS.DUPLICATE_QUERY, {
 				field: key,
 				hint: "This parameter only accepts a single value",
 			});
@@ -195,9 +195,9 @@ export const handleRandomImg = async (request, env) => {
 	}
 
 	// 解析请求 URL 以获取路径与查询参数
-	let params;
+	let query;
 	try {
-		params = new URL(request.url).searchParams;
+		query = new URL(request.url).searchParams;
 	} catch {
 		return jsonErrorResponse({
 			status: 400,
@@ -208,19 +208,19 @@ export const handleRandomImg = async (request, env) => {
 	}
 
 	// 校验查询参数白名单，存在非法参数时直接返回错误
-	const invalidParamsResponse = validateAllowedQueryParams(params);
-	if (invalidParamsResponse) {
-		return invalidParamsResponse;
+	const invalidQueryResponse = validateAllowedQuery(query);
+	if (invalidQueryResponse) {
+		return invalidQueryResponse;
 	}
 
 	// 校验单值参数不可重复，同一键只能出现一次
-	const duplicateParamResponse = validateSingleValueParams(params);
-	if (duplicateParamResponse) {
-		return duplicateParamResponse;
+	const duplicateQueryResponse = validateSingleValueQuery(query);
+	if (duplicateQueryResponse) {
+		return duplicateQueryResponse;
 	}
 
 	// 解析响应方式
-	const method = params.get("m")?.toLowerCase() || CONFIG.DEFAULT_METHOD;
+	const method = query.get("m")?.toLowerCase() || CONFIG.DEFAULT_METHOD;
 
 	// 校验 method 参数：仅允许 proxy 或 redirect
 	if (!METHOD_SET.has(method)) {
@@ -231,7 +231,7 @@ export const handleRandomImg = async (request, env) => {
 	const effectiveMethod = CONFIG.REDIRECT_ENABLED ? method : "proxy";
 
 	// 读取亮度参数（若未传则为 null）
-	const requestedBrightness = params.get("b")?.toLowerCase() || null;
+	const requestedBrightness = query.get("b")?.toLowerCase() || null;
 	// 校验亮度参数合法性（允许 dark / light）
 	if (requestedBrightness && !BRIGHTNESS_SET.has(requestedBrightness)) {
 		return jsonErrorResponse(CONFIG.ERRORS.INVALID_BRIGHTNESS, { field: "b" });
@@ -240,7 +240,7 @@ export const handleRandomImg = async (request, env) => {
 	const brightnessCandidates = requestedBrightness ? [requestedBrightness] : CONFIG.BRIGHTNESS_VALUES;
 
 	// 读取请求指定的设备参数（若未传则为 null）
-	const requestedDevice = params.get("d")?.toLowerCase() || null;
+	const requestedDevice = query.get("d")?.toLowerCase() || null;
 	// 校验设备参数合法性（允许 pc / mb / r）
 	if (requestedDevice && !REQUEST_DEVICE_SET.has(requestedDevice)) {
 		return jsonErrorResponse(CONFIG.ERRORS.INVALID_DEVICE, { field: "d" });
@@ -262,7 +262,7 @@ export const handleRandomImg = async (request, env) => {
 			: [device];
 
 	// 读取并归一化 theme 参数：支持多次传参与逗号分隔，最终统一小写并去重
-	const normalizedThemeValues = Array.from(new Set(params
+	const normalizedThemeValues = Array.from(new Set(query
 		.getAll("t")
 		.flatMap((value) => value.split(","))
 		.map((value) => value.trim().toLowerCase())

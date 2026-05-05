@@ -86,8 +86,8 @@ SUPPORTED_BRIGHTNESS = {"dark", "light"}
 
 # 一次完整测试中必须覆盖到的错误类型。
 REQUIRED_ERROR_COVERAGE_KEYS = {
-    "INVALID_QUERY_PARAMS",
-    "DUPLICATE_PARAM",
+    "INVALID_QUERY",
+    "DUPLICATE_QUERY",
     "INVALID_DEVICE",
     "INVALID_BRIGHTNESS",
     "INVALID_METHOD",
@@ -252,8 +252,8 @@ class ApiTester:
         self.timeout = timeout
         self.random_runs = random_runs
         self.error_coverage: dict[str, bool] = {
-            "INVALID_QUERY_PARAMS": False,
-            "DUPLICATE_PARAM": False,
+            "INVALID_QUERY": False,
+            "DUPLICATE_QUERY": False,
             "INVALID_DEVICE": False,
             "INVALID_BRIGHTNESS": False,
             "INVALID_METHOD": False,
@@ -433,9 +433,9 @@ class ApiTester:
     # 根据错误消息关键词标记已覆盖的错误类型，用于最终覆盖率检查。
     def _mark_error_coverage(self, message: str) -> None:
         if "Invalid query parameters" in message:
-            self.error_coverage["INVALID_QUERY_PARAMS"] = True
+            self.error_coverage["INVALID_QUERY"] = True
         elif "Duplicate query parameter" in message:
-            self.error_coverage["DUPLICATE_PARAM"] = True
+            self.error_coverage["DUPLICATE_QUERY"] = True
         elif "Invalid device" in message:
             self.error_coverage["INVALID_DEVICE"] = True
         elif "Invalid brightness" in message:
@@ -695,7 +695,7 @@ class ApiTester:
             400,
             "Invalid query parameters",
             "invalid query key",
-            expected_detail_keys=["invalidParams", "allowedParams"],
+            expected_detail_keys=["invalidQuery", "allowedQuery"],
         )
         # 非法 device 值应返回 400 并附带 field 详情。
         self.expect_json_error(
@@ -744,7 +744,7 @@ class ApiTester:
             400,
             "Invalid query parameters",
             "invalid query key has higher priority than method logic",
-            expected_detail_keys=["invalidParams", "allowedParams"],
+            expected_detail_keys=["invalidQuery", "allowedQuery"],
         )
 
         # 非法 key 与合法已知参数混用时仍应拦截。
@@ -754,7 +754,7 @@ class ApiTester:
             400,
             "Invalid query parameters",
             "invalid query still blocks valid known params",
-            expected_detail_keys=["invalidParams", "allowedParams"],
+            expected_detail_keys=["invalidQuery", "allowedQuery"],
         )
 
         # method 校验优先级高于 device/brightness/theme。
@@ -768,7 +768,7 @@ class ApiTester:
             forbidden_detail_keys=["allowed"],
         )
 
-        # 3.5) 单值参数重复（d/b/m 各只能出现一次）→ 400 DUPLICATE_PARAM
+        # 3.5) 单值参数重复（d/b/m 各只能出现一次）→ 400 DUPLICATE_QUERY
         dup_device_result = self.request_query_items(
             "/random-img",
             query_items=[("d", "pc"), ("d", "mb")],

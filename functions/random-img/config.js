@@ -10,9 +10,9 @@ export const FOLDER_MAP_KEY = "FOLDER_MAP";
 export const BASE_IMAGE_URL_KEY = "BASE_IMAGE_URL";
 
 // 允许的查询参数：d=设备, b=亮度, t=主题, m=响应方式
-export const ALLOWED_PARAMS = ["d", "b", "t", "m"];
+export const ALLOWED_QUERY = ["d", "b", "t", "m"];
 // 仅允许传入单个值的参数（主题 t 允许多值）
-export const SINGLE_VALUE_PARAMS = ["d", "b", "m"];
+export const SINGLE_VALUE_QUERY = ["d", "b", "m"];
 // folderMap 中的设备类型：pc=桌面端, mb=移动端
 export const MAP_DEVICES = ["pc", "mb"];
 // 请求可接受的设备值：在 MAP_DEVICES 基础上增加 r = 强制随机
@@ -56,9 +56,9 @@ export const IMAGE_PATH_PLACEHOLDER_PATTERN = /\{(device|brightness|theme|index)
 // 随机图片 API 错误定义
 export const ERRORS = {
 	// 非法查询参数键
-	INVALID_QUERY_PARAMS: { status: 400, message: "Bad Request: Invalid query parameters" },
+	INVALID_QUERY: { status: 400, message: "Bad Request: Invalid query parameters" },
 	// 单值参数重复
-	DUPLICATE_PARAM: { status: 400, message: "Bad Request: Duplicate query parameter" },
+	DUPLICATE_QUERY: { status: 400, message: "Bad Request: Duplicate query parameter" },
 	// 非法设备值
 	INVALID_DEVICE: { status: 400, message: "Bad Request: Invalid device" },
 	// 非法亮度值

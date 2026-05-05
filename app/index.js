@@ -14,9 +14,9 @@ const HIDDEN_PATH_KEYS = ["RANDOM_IMG_COUNT_PATH"];
 // - 固定 handler: 直接传函数
 // - 业务模块: 传模块导出对象，按 handleXxx 自动匹配
 const ROUTES = {
-	"/": async () => jsonErrorResponse({ status: 404, message: "No API route specified" }),
-	"/hello": async () => jsonSuccessResponse({ message: "Hello, World!" }),
-	"/healthcheck": async () => jsonSuccessResponse({ message: "API on EdgeFunction is healthy" }),
+	"/": () => jsonErrorResponse({ status: 404, message: "No API route specified" }),
+	"/hello": () => jsonSuccessResponse({ message: "Hello, World!" }),
+	"/healthcheck": () => jsonSuccessResponse({ message: "API on EdgeFunction is healthy" }),
 	"/random-img": randomImgHandlers,
 };
 
