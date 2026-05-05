@@ -1,0 +1,29 @@
+{
+    "pc": {
+        "dark": {
+            "theme1": 1,
+            "theme2": 3,
+            "theme3": 5,
+            "theme4": 7,
+            "theme5": 9
+        },
+        "light": {
+            "theme1": 2,
+            "theme2": 4,
+            "theme3": 6
+        }
+    },
+    "mb": {
+        "dark": {
+            "theme1": 1,
+            "theme2": 3,
+            "theme3": 5
+        },
+        "light": {
+            "theme1": 2,
+            "theme2": 4,
+            "theme3": 6,
+            "theme4": 8
+        }
+    }
+}
