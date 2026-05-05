@@ -100,7 +100,7 @@ random_img_config
 }
 ```
 
-图片 URL 的路径部分不从 KV 读取，而是在 [functions/random-img.js](./functions/random-img.js) 顶部配置区设置：
+图片 URL 的路径部分不从 KV 读取，而是在 [functions/random-img/config.js](./functions/random-img/config.js) 中设置：
 
 ```js
 const IMAGE_INDEX_DIGITS = 6;
@@ -270,7 +270,8 @@ hidden_routes
 ```powershell
 node --check app/index.js
 node --check commons/kv.js
-node --check functions/random-img.js
+node --check functions/random-img/random-img.js
+node --check functions/random-img/config.js
 python -m py_compile tests/main-test.py
 python -m py_compile tests/random-img-test.py
 ```
@@ -283,7 +284,7 @@ python tests/main-test.py
 python tests/random-img-test.py
 ```
 
-如果修改了 [functions/random-img.js](./functions/random-img.js) 顶部的 `IMAGE_INDEX_DIGITS`、`IMAGE_PATH_PATTERN` 或 `IMAGE_FILE_EXTENSION`，请同步修改 [tests/random-img-test.py](./tests/random-img-test.py) 顶部同名常量，用于校验 redirect 的 `Location` 格式。
+如果修改了 [functions/random-img/config.js](./functions/random-img/config.js) 中的 `IMAGE_INDEX_DIGITS`、`IMAGE_PATH_PATTERN` 或 `IMAGE_FILE_EXTENSION`，请同步修改 [tests/random-img-test.py](./tests/random-img-test.py) 顶部同名常量，用于校验 redirect 的 `Location` 格式。
 
 ## 目录结构
 
@@ -291,7 +292,7 @@ python tests/random-img-test.py
 app/                 通用入口与路由分发
 commons/             KV、响应、Referer、平台适配等公共能力
 edge-functions/      EdgeOne 平台路由适配入口
-functions/           业务函数
+functions/           业务函数与业务配置
 tests/               端到端测试脚本
 ```
 

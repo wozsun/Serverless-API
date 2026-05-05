@@ -68,7 +68,7 @@ IMAGE_INFO_HEADER_NAME = "X-Image-Info"
 IMAGE_INDEX_DIGITS = 6
 # 图片文件扩展名。
 IMAGE_FILE_EXTENSION = ".webp"
-# 图片路径模板，需与 functions/random-img.js 中的 IMAGE_PATH_PATTERN 保持一致。
+# 图片路径模板，需与 functions/random-img/config.js 中的 IMAGE_PATH_PATTERN 保持一致。
 IMAGE_PATH_PATTERN = "{device}-{brightness}/{theme}/{index}"
 # 5xx 响应最大重试次数（不含首次请求）。
 MAX_HTTP_5XX_RETRIES = 5

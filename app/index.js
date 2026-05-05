@@ -1,6 +1,6 @@
 import { getKvTextCached } from "../commons/kv.js";
 import { jsonErrorResponse, jsonSuccessResponse } from "../commons/response.js";
-import * as randomImgHandlers from "../functions/random-img.js";
+import * as randomImgHandlers from "../functions/random-img/random-img.js";
 
 // ===========================
 // 路由配置
