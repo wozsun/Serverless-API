@@ -1,4 +1,4 @@
-// Tencent Cloud EdgeOne / 专用入口
+// Tencent Cloud EdgeOne 根路径路由
 
 import { handleEdgeOneRequest } from "../commons/edgeone-entry.js";
 

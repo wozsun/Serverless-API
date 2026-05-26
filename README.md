@@ -1,19 +1,35 @@
 # Serverless-API
 
-基于边缘函数的 Serverless API 项目，默认面向阿里云 ESA，同时已适配 Cloudflare Workers 与腾讯云 EdgeOne。
-
-当前主要提供随机图片 API，并带有一个隐藏统计路由。
+基于边缘函数的 Serverless API 项目，默认面向阿里云 ESA，同时兼容 Cloudflare Workers 与腾讯云 EdgeOne。
 
 ## 特性
 
 - 边缘函数运行，低延迟、免运维
+- 统一路由框架：普通路由按命名约定自动解析，隐藏路由路径由 KV 动态控制
 - 使用 KV 管理运行时配置，无需每次改配置都重新部署
 - 支持 ESA EdgeKV、Cloudflare Workers KV、腾讯云 EdgeOne KV
-- 支持 `proxy` 代理图片内容或 `redirect` 返回图片地址
-- 支持按设备、亮度、主题筛选随机图片
-- 支持隐藏路由，路由路径可由 KV 动态控制
+- 模块化业务函数组织，新增 API 只需添加文件并注册路由
+
+## 快速开始
+
+1. Clone 本项目
+2. 在 KV 中配置必需键（见 [KV 配置](#kv-配置)）
+3. 按目标平台部署（见[部署指南](#部署指南)）
+4. 访问 `GET /healthcheck` 验证服务正常，访问 `GET /random-img` 验证图片 API
+
+## 目录结构
+
+```text
+app/                 通用入口与路由分发
+commons/             KV、响应、Referer、平台适配等公共能力
+edge-functions/      EdgeOne 平台路由适配入口
+functions/           业务函数与业务配置
+tests/               端到端测试脚本
+```
 
 ## 路由
+
+### 普通路由
 
 | 路由 | 说明 |
 | --- | --- |
@@ -21,64 +37,139 @@
 | `/hello` | 示例路由 |
 | `/healthcheck` | 健康检查 |
 | `/random-img` | 随机图片 API |
-| KV 配置的隐藏路径 | 随机图片数量统计 API，对应 `RANDOM_IMG_COUNT_PATH` |
 
-隐藏统计路由不接受查询参数；如果访问时携带 query，会返回 403。
+普通路由注册在 `app/index.js` 的 `ROUTES` 对象中。若值为函数则直接用作 handler；若值为模块对象，则按命名约定自动匹配：路径 `/random-img` 对应导出 `handleRandomImg`。
 
-## 随机图片 API
+### 隐藏路由
 
-请求：
+隐藏路由的路径不在代码中硬编码，而是从 KV 动态读取。当前注册了一个隐藏路由：
 
-```text
-GET /random-img
-```
-
-支持的查询参数：
-
-| 参数 | 可选值 | 说明 |
+| KV Key | 对应 Handler | 说明 |
 | --- | --- | --- |
-| `d` | `pc` / `mb` / `r` | 设备类型。`pc` 为桌面端，`mb` 为移动端，`r` 为随机设备。不传时按 `User-Agent` 自动推断，无法识别则随机 |
-| `b` | `dark` / `light` | 亮度类型。不传时随机 |
-| `t` | 主题名或 `!主题名` | 主题筛选。支持逗号分隔和重复参数，例如 `t=a,b` 或 `t=a&t=b`。以 `!` 开头表示排除主题，包含与排除不能混用 |
-| `m` | `proxy` / `redirect` | 响应方式。默认 `proxy` |
+| `RANDOM_IMG_COUNT_PATH` | `handleRandomImgCount` | 随机图片数量统计 API |
 
-查询参数白名单与单值约束在 [functions/random-img/config.js](./functions/random-img/config.js) 中配置：
+新增隐藏路由只需在 `HIDDEN_PATH_KEYS` 数组中追加 KV key，并在已注册的业务模块中导出对应的 `handleXxx` 函数。
+
+隐藏路由不接受查询参数，携带 query 会返回 403。
+
+## API 接口
+
+### `GET /random-img`
+
+随机图片主接口。
+
+#### 查询参数
+
+| 参数 | 含义 | 可选值 | 默认值 |
+| --- | --- | --- | --- |
+| `d` | 设备类型 | `pc` / `mb` / `r`（强制随机） | 按 User-Agent 自动推断 `pc`/`mb`，无法识别则随机 |
+| `b` | 明暗类型 | `dark` / `light` | 随机 |
+| `t` | 主题（支持多值） | 任意存在于 `FOLDER_MAP` 中的主题名，或以 `!` 开头排除 | 全部主题中随机 |
+| `m` | 响应方式 | `proxy` / `redirect` | `proxy` |
+
+查询参数白名单与单值约束在 `functions/random-img/config.js` 中定义：
 
 ```js
 const ALLOWED_QUERY = ["d", "b", "t", "m"];
 const SINGLE_VALUE_QUERY = ["d", "b", "m"];
 ```
 
-其中 `t` 不在 `SINGLE_VALUE_QUERY` 中，因此允许重复传入。
+其中 `t` 不在 `SINGLE_VALUE_QUERY` 中，因此允许多次传入。
 
-示例：
+`t` 参数支持以下语法：
+
+- 逗号分隔：`?t=theme1,theme2`
+- 重复参数：`?t=theme1&t=theme2`
+- 排除语法：`?t=!theme1` 从全部主题中排除 `theme1`
+- 排除多值：`?t=!theme1,!theme2` 或 `?t=!theme1&t=!theme2`
+
+> ⚠️ 包含与排除不可混用，例如 `?t=theme1,!theme2` 会返回 400 错误。
+
+#### 示例
 
 ```text
 /random-img
 /random-img?d=pc&b=dark
-/random-img?t=nature,city&m=redirect
-/random-img?t=!city
+/random-img?t=theme1,theme2&m=redirect
+/random-img?t=!theme1
+/random-img?d=r&b=light&t=theme1
+/random-img?d=mb&b=dark&t=!theme1&m=redirect
 ```
 
-`proxy` 模式会请求上游图片并转发内容。当前开启 `X-Image-Info` 响应头，格式类似：
+#### 响应方式
 
-```text
-pc-dark-nature-12; 34
+`m=proxy`（默认）：
+- 边缘函数回源拉取图片并透传内容
+- 响应头会附加 `X-Image-Info`，格式为 `{device}-{brightness}-{theme}-{index}; {耗时ms}`，例如 `pc-dark-nature-000012; 34`
+- `X-Image-Info` 可通过 `functions/random-img/config.js` 中的 `IMAGE_INFO_HEADER_ENABLED` 开关
+
+`m=redirect`：
+- 返回 302，`Location` 指向目标图片 URL
+- 可通过 `functions/random-img/config.js` 中的 `REDIRECT_ENABLED` 全局禁用，设为 `false` 后所有请求强制使用 proxy 模式
+
+> ⚠️ 隐私提示：`redirect` 模式不会隐藏上游图片源地址，客户端可直接看到图片 CDN/存储源 URL。如需隐藏源地址请使用默认的 `proxy` 模式。
+
+#### 错误响应格式
+
+所有接口的错误响应均为 JSON，结构如下：
+
+```json
+{
+  "status": 400,
+  "message": "Bad Request: Invalid query parameters",
+  "details": {
+    "invalidQuery": ["x"],
+    "allowedQuery": ["d", "b", "t", "m"]
+  }
+}
 ```
 
-`redirect` 模式返回 302，并把图片 URL 放在 `Location` 头中。
+常见状态码：
+
+| 状态码 | 场景 |
+| --- | --- |
+| 400 | 参数非法、重复、混用包含/排除主题等 |
+| 403 | Referer 校验未通过（仅在启用时），或隐藏路由携带查询参数 |
+| 404 | 无匹配图片或无匹配路由 |
+| 405 | 使用了 GET 以外的方法 |
+| 500 | KV 配置缺失或无效 |
+| 502 | 上游图片服务请求失败 |
+
+具体错误定义见 `functions/random-img/config.js` 中的 `ERRORS` 常量。
+
+### `GET /random-img/count`（隐藏路由）
+
+返回 FOLDER_MAP 中所有图片的汇总统计。路径由 KV 中的 `RANDOM_IMG_COUNT_PATH` 动态配置，这里以 `/random-img/count` 为例。
+
+响应示例：
+
+```json
+{
+  "totalImages": 66,
+  "groupTotals": {
+    "pc-dark": 25,
+    "pc-light": 12,
+    "mb-dark": 9,
+    "mb-light": 20
+  },
+  "themeDetails": {
+    "theme1": { "total": 16, "pc-dark": 1, "mb-light": 2 },
+    "theme2": { "total": 20, "pc-dark": 3, "pc-light": 4, "mb-dark": 3, "mb-light": 10 }
+  }
+}
+```
 
 ## KV 配置
 
 ### `random_img_config`
 
-随机图片 API 使用 namespace：
+随机图片 API 使用的命名空间：
 
 ```text
 random_img_config
 ```
 
-必需键：
+#### 必需键
 
 | Key | 类型 | 说明 |
 | --- | --- | --- |
@@ -90,121 +181,86 @@ random_img_config
 ```json
 {
   "pc": {
-    "dark": {
-      "nature": 10,
-      "city": 8
-    },
-    "light": {
-      "nature": 6
-    }
+    "dark": { "theme1": 15, "theme2": 13 },
+    "light": { "theme1": 12, "theme2": 9 }
   },
   "mb": {
-    "dark": {
-      "nature": 12
-    },
-    "light": {
-      "city": 5
-    }
+    "dark": { "theme1": 2, "theme2": 6 },
+    "light": { "theme1": 4, "theme2": 4 }
   }
 }
 ```
 
-图片 URL 的路径部分不从 KV 读取，而是在 [functions/random-img/config.js](./functions/random-img/config.js) 中设置：
+读取规则：
 
-```js
-const IMAGE_INDEX_DIGITS = 6;
-const IMAGE_FILE_EXTENSION = ".webp";
-const IMAGE_PATH_PATTERN = "{device}-{brightness}/{theme}/{index}";
-```
+- 仅读取顶层设备键 `pc`、`mb`
+- 仅读取明暗键 `dark`、`light`
+- 主题计数转为数字后，有限且 `> 0` 的参与随机，`0` 或无效值不进入候选池
 
-最终 URL = `BASE_IMAGE_URL` + 渲染后的 `IMAGE_PATH_PATTERN` + `IMAGE_FILE_EXTENSION`。
+#### 可选键
 
-可用占位符：
+##### `ALLOWED_REFERER`
 
-| 占位符 | 说明 |
-| --- | --- |
-| `{device}` | 设备值，例如 `pc` / `mb` |
-| `{brightness}` | 亮度值，例如 `dark` / `light` |
-| `{theme}` | 主题名 |
-| `{index}` | 补零后的图片索引，例如 `000001` |
+Referer 白名单（多行文本）。Referer 校验默认关闭，由 `functions/random-img/config.js` 中的 `REFERER_CHECK_ENABLED` 控制。
 
-如果图片目录结构不同，只需要改 `IMAGE_PATH_PATTERN`，例如：
-
-```js
-const IMAGE_PATH_PATTERN = "{device}/{brightness}/{theme}/{index}";
-const IMAGE_PATH_PATTERN = "{device}-{brightness}/{theme}-{index}";
-const IMAGE_PATH_PATTERN = "{theme}/{device}-{brightness}/{index}";
-```
-
-例如：
-
-```text
-https://assets.example.com/images/pc-dark/nature/000001.webp
-```
-
-### `hidden_routes`
-
-隐藏统计路由使用 namespace：
-
-```text
-hidden_routes
-```
-
-必需键：
-
-| Key | 类型 | 说明 |
-| --- | --- | --- |
-| `RANDOM_IMG_COUNT_PATH` | Text | 随机图片统计接口路径，例如 `/img-count` |
-
-### Referer 白名单
-
-Referer 校验当前在代码中默认关闭：
-
-```js
-const REFERER_CHECK_ENABLED = false;
-```
-
-如果开启，需要在 `random_img_config` 中配置：
-
-```text
-ALLOWED_REFERER
-```
-
-该值是多行文本，支持精确 origin 与通配子域名：
+若启用，需在此键中配置白名单，支持精确 origin 与通配子域名：
 
 ```text
 https://example.com
 https://*.example.com
 ```
 
-## 多平台 KV 适配
+### `hidden_routes`
 
-KV 读取统一通过 `commons/kv.js` 的 getter 完成，底层 client 由 `commons/kv-providers.js` 根据 `KV_PROVIDER` 分发。
+隐藏路由使用的命名空间：
 
-| 平台 | `KV_PROVIDER` | KV client 来源 |
+```text
+hidden_routes
+```
+
+#### 必需键
+
+| Key | 类型 | 说明 |
 | --- | --- | --- |
-| ESA | 默认或 `ESA` | `new EdgeKV({ namespace })` |
-| Cloudflare Workers | `CF` | `env[namespace]` |
-| EdgeOne | `EO` | 优先 `env[namespace]`，其次 `globalThis[namespace]` |
+| `RANDOM_IMG_COUNT_PATH` | Text | 随机图片统计接口路径，例如 `/img-count` |
 
-现有 getter：
+如需新增隐藏路由，在 `app/index.js` 的 `HIDDEN_PATH_KEYS` 数组中追加 KV key，并在对应业务模块中导出 `handleXxx` 函数。
 
-| Getter | 用途 |
-| --- | --- |
-| `getKvJsonObjectCached` | 读取 JSON 配置，例如 `FOLDER_MAP` |
-| `getKvUrlCached` | 读取单行 URL，例如 `BASE_IMAGE_URL` |
-| `getKvTextCached` | 读取单行文本，例如隐藏路由路径 |
-| `getKvTextLinesCached` | 读取多行文本，例如 Referer 白名单 |
-| `getKvBooleanCached` | 读取严格布尔值 |
-| `getKvNumberCached` | 读取有限数字 |
+### 图片存储路径
 
-所有 getter 都带内存缓存、负缓存和 KV 读取重试。
+图片路径由 `BASE_IMAGE_URL`（KV）+ `IMAGE_PATH_PATTERN`（config.js）+ 文件扩展名组成。
 
-## 部署说明
+默认 `IMAGE_PATH_PATTERN`：
+
+```text
+{device}-{brightness}/{theme}/{index}
+```
+
+因此默认图片存储结构为：
+
+```text
+{device}-{brightness}/{theme}/{index}.webp
+```
+
+示例：
+
+```text
+pc-dark/theme1/000001.webp
+mb-light/theme2/000002.webp
+```
+
+`IMAGE_PATH_PATTERN` 支持 `{device}`、`{brightness}`、`{theme}`、`{index}` 四个占位符，可在 `functions/random-img/config.js` 中自由组合：
+
+```text
+{device}/{brightness}-{theme}/{index}
+{theme}/{device}-{brightness}-{index}
+```
+
+## 部署指南
 
 ### 阿里云 ESA
 
-ESA 使用 [esa.jsonc](./esa.jsonc)：
+使用 [esa.jsonc](./esa.jsonc)：
 
 ```jsonc
 {
@@ -219,7 +275,7 @@ ESA 使用 [esa.jsonc](./esa.jsonc)：
 
 ### Cloudflare Workers
 
-Cloudflare 使用 [wrangler.jsonc](./wrangler.jsonc)：
+使用 [wrangler.jsonc](./wrangler.jsonc)：
 
 ```jsonc
 {
@@ -240,47 +296,70 @@ Cloudflare 使用 [wrangler.jsonc](./wrangler.jsonc)：
 }
 ```
 
-KV binding 名需要与代码中的 namespace 名一致。
+KV binding 名需与代码中的命名空间名一致。
+
+部署命令：
+
+```bash
+npx wrangler deploy
+```
 
 ### 腾讯云 EdgeOne
 
-EdgeOne 只把 `edge-functions` 下的文件识别成函数路由。本项目使用两个极薄的适配入口：
+EdgeOne 识别 `edge-functions` 目录下的文件为函数路由。本项目使用两个极薄的适配入口：
 
 ```text
 edge-functions/index.js
 edge-functions/[[default]].js
 ```
 
-它们都会转发到：
+两者均委托给 `commons/edgeone-entry.js`，后者自动注入 `KV_PROVIDER=EO` 后转交 `app/index.js` 处理。新增普通路由通常无需新增 EdgeOne 入口文件。
 
-```text
-commons/edgeone-entry.js
-```
-
-适配器会自动注入：
-
-```js
-KV_PROVIDER: "EO"
-```
-
-然后继续调用统一的 `app.fetch()`。因此业务路由仍然只需要维护在 `app/index.js`，以后新增普通路由通常不需要新增 EdgeOne 入口文件。
-
-EdgeOne KV namespace 的绑定变量名建议与代码 namespace 一致：
+EdgeOne KV 命名空间的绑定变量名需与代码一致：
 
 ```text
 random_img_config
 hidden_routes
 ```
 
+## 多平台 KV 适配
+
+KV 读取统一通过 `commons/kv.js` 的 getter 完成，底层 client 由 `commons/kv-providers.js` 根据 `KV_PROVIDER` 分发。
+
+| 平台 | `KV_PROVIDER` | KV client 来源 |
+| --- | --- | --- |
+| ESA | 默认或 `ESA` | `new EdgeKV({ namespace })` |
+| Cloudflare Workers | `CF` | `env[namespace]` |
+| EdgeOne | `EO` | 优先 `env[namespace]`，其次 `globalThis[namespace]` |
+
+可用的 KV getter：
+
+| Getter | 用途 |
+| --- | --- |
+| `getKvJsonObjectCached` | 读取 JSON 对象，如 `FOLDER_MAP` |
+| `getKvUrlCached` | 读取单行 URL，如 `BASE_IMAGE_URL` |
+| `getKvTextCached` | 读取单行文本，如隐藏路由路径 |
+| `getKvTextLinesCached` | 读取多行文本，如 Referer 白名单 |
+| `getKvBooleanCached` | 读取严格布尔值 |
+| `getKvNumberCached` | 读取有限数字 |
+
+所有 getter 均带内存缓存、负缓存和 KV 读取重试。
+
 ## 开发与测试
 
-全仓语法检查可参考：
+语法检查：
 
-```powershell
+```bash
 node --check app/index.js
 node --check commons/kv.js
+node --check commons/kv-providers.js
+node --check commons/referer.js
+node --check commons/response.js
+node --check commons/edgeone-entry.js
 node --check functions/random-img/random-img.js
 node --check functions/random-img/config.js
+node --check edge-functions/index.js
+node --check edge-functions/[[default]].js
 python -m py_compile tests/main-test.py
 python -m py_compile tests/random-img-test.py
 ```
@@ -293,17 +372,22 @@ python tests/main-test.py
 python tests/random-img-test.py
 ```
 
-如果修改了 [functions/random-img/config.js](./functions/random-img/config.js) 中的 `IMAGE_INDEX_DIGITS`、`IMAGE_PATH_PATTERN` 或 `IMAGE_FILE_EXTENSION`，请同步修改 [tests/random-img-test.py](./tests/random-img-test.py) 顶部同名常量，用于校验 redirect 的 `Location` 格式。
+若修改了 `functions/random-img/config.js` 中的 `IMAGE_INDEX_DIGITS`、`IMAGE_PATH_PATTERN` 或 `IMAGE_FILE_EXTENSION`，需同步修改 `tests/random-img-test.py` 顶部的同名常量。
 
-## 目录结构
+### 关键配置参数
 
-```text
-app/                 通用入口与路由分发
-commons/             KV、响应、Referer、平台适配等公共能力
-edge-functions/      EdgeOne 平台路由适配入口
-functions/           业务函数与业务配置
-tests/               端到端测试脚本
-```
+`functions/random-img/config.js` 中的可调参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `FETCH_MAX_ATTEMPTS` | 上游请求最大重试次数 |
+| `FETCH_TIMEOUT_MS` | 单次上游请求超时（毫秒） |
+| `IMAGE_INDEX_DIGITS` | 图片索引补零位数 |
+| `IMAGE_FILE_EXTENSION` | 图片文件扩展名 |
+| `IMAGE_PATH_PATTERN` | 图片路径模板 |
+| `REDIRECT_ENABLED` | 是否允许 redirect 模式 |
+| `REFERER_CHECK_ENABLED` | 是否启用 Referer 校验 |
+| `IMAGE_INFO_HEADER_ENABLED` | 是否返回 X-Image-Info 响应头 |
 
 ## 开源协议
 

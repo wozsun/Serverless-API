@@ -1,5 +1,4 @@
-// Tencent Cloud EdgeOne /* 专用入口
-
+// Tencent Cloud EdgeOne catch-all路由
 import { handleEdgeOneRequest } from "../commons/edgeone-entry.js";
 
 export default function onRequest(context) {
