@@ -1,13 +1,23 @@
 // ESA
 const edgeKVClients = new Map();
+const FAILED_EDGE_KV_CLIENT = Symbol("FAILED_EDGE_KV_CLIENT");
 const getEsaKvClient = ({ namespace }) => {
+	if (edgeKVClients.has(namespace)) {
+		const cachedClient = edgeKVClients.get(namespace);
+		return cachedClient === FAILED_EDGE_KV_CLIENT ? null : cachedClient;
+	}
 	if (typeof EdgeKV !== "function") {
+		edgeKVClients.set(namespace, FAILED_EDGE_KV_CLIENT);
 		return null;
 	}
-	if (!edgeKVClients.has(namespace)) {
-		edgeKVClients.set(namespace, new EdgeKV({ namespace }));
+	try {
+		const client = new EdgeKV({ namespace });
+		edgeKVClients.set(namespace, client);
+		return client;
+	} catch {
+		edgeKVClients.set(namespace, FAILED_EDGE_KV_CLIENT);
+		return null;
 	}
-	return edgeKVClients.get(namespace);
 };
 
 // Cloudflare Workers

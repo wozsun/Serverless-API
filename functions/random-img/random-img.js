@@ -9,6 +9,7 @@ const SINGLE_VALUE_QUERY_SET = new Set(CONFIG.SINGLE_VALUE_QUERY);
 const REQUEST_DEVICE_SET = new Set(CONFIG.REQUEST_DEVICES);
 const BRIGHTNESS_SET = new Set(CONFIG.BRIGHTNESS_VALUES);
 const METHOD_SET = new Set(CONFIG.METHOD_VALUES);
+const RETRYABLE_UPSTREAM_STATUS_CODE_SET = new Set(CONFIG.RETRYABLE_UPSTREAM_STATUS_CODES);
 
 // 有效主题缓存：避免短时内多次请求重复从 FOLDER_MAP 提取主题列表
 let validThemeCache = {
@@ -123,6 +124,22 @@ const buildImageResult = (baseImageUrl, selectedFolder) => {
 	return { url, imageInfo };
 };
 
+// 带超时控制地请求上游图片，避免上游无响应时一直挂起到平台超时
+const fetchWithTimeout = async (url) => {
+	if (typeof AbortController === "undefined") {
+		return await fetch(url);
+	}
+
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT_MS);
+
+	try {
+		return await fetch(url, { signal: controller.signal });
+	} finally {
+		clearTimeout(timeoutId);
+	}
+};
+
 // 按照指定方式（proxy/redirect）响应图片请求
 const respondImageByMethod = async (method, imageUrl, imageInfo) => {
 	// redirect 模式：直接构造 302 跳转响应
@@ -134,17 +151,18 @@ const respondImageByMethod = async (method, imageUrl, imageInfo) => {
 	}
 
 	// proxy 模式：请求上游并透传响应，网络异常或临时 HTTP 状态失败时线性退避重试
-	for (let attempt = 1; attempt <= CONFIG.FETCH_MAX_ATTEMPTS; attempt++) {
+	const maxAttempts = Math.max(0, Number(CONFIG.FETCH_MAX_ATTEMPTS) || 0);
+	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 		try {
 			const fetchStartedAt = Date.now();
-			const upstreamResponse = await fetch(imageUrl);
+			const upstreamResponse = await fetchWithTimeout(imageUrl);
 			const fetchDurationMs = Date.now() - fetchStartedAt;
 
 			// 上游返回非 2xx 状态码：临时状态重试，其他状态立即返回错误
 			if (!upstreamResponse.ok) {
 				if (
-					CONFIG.RETRYABLE_UPSTREAM_STATUS_CODES.has(upstreamResponse.status) &&
-					attempt < CONFIG.FETCH_MAX_ATTEMPTS
+					RETRYABLE_UPSTREAM_STATUS_CODE_SET.has(upstreamResponse.status) &&
+					attempt < maxAttempts
 				) {
 					await new Promise((resolve) => setTimeout(resolve, CONFIG.FETCH_RETRY_DELAY_MS * attempt));
 					continue;
@@ -166,7 +184,7 @@ const respondImageByMethod = async (method, imageUrl, imageInfo) => {
 			return response;
 		} catch {
 			// 已耗尽重试次数，返回上游请求失败错误
-			if (attempt >= CONFIG.FETCH_MAX_ATTEMPTS) {
+			if (attempt >= maxAttempts) {
 				return jsonErrorResponse(CONFIG.ERRORS.UPSTREAM_FETCH_EXCEPTION, {
 					hint: "Upstream request failed before receiving a valid response",
 					retryAttempts: attempt,
@@ -175,6 +193,11 @@ const respondImageByMethod = async (method, imageUrl, imageInfo) => {
 			await new Promise((resolve) => setTimeout(resolve, CONFIG.FETCH_RETRY_DELAY_MS * attempt));
 		}
 	}
+
+	return jsonErrorResponse(CONFIG.ERRORS.UPSTREAM_FETCH_EXCEPTION, {
+		hint: "No upstream fetch attempts were made",
+		retryAttempts: maxAttempts,
+	});
 };
 
 
@@ -247,14 +270,13 @@ export const handleRandomImg = async (request, env) => {
 	}
 
 	// 未指定设备时，根据 User-Agent 自动推断；无法识别则回退到随机
-	let autoDevice = "r";
-	if (!requestedDevice) {
+	let device = requestedDevice;
+	if (!device) {
 		const userAgent = request.headers.get("User-Agent") || "";
 		const isMobile = /Mobi|Android|iPhone/i.test(userAgent);
 		const isDesktop = /Windows|Macintosh|Linux x86_64|X11/i.test(userAgent);
-		autoDevice = isMobile ? "mb" : (isDesktop ? "pc" : "r");
+		device = isMobile ? "mb" : (isDesktop ? "pc" : "r");
 	}
-	const device = requestedDevice || autoDevice;
 	// 构建设备候选列表："r" 展开为全部设备，否则仅用指定值
 	const deviceCandidates =
 		device === "r"
@@ -361,7 +383,7 @@ export const handleRandomImg = async (request, env) => {
 		selectedFolder = candidates[0];
 	} else {
 		const totalWeight = candidates.reduce((sum, candidate) => sum + candidate.count, 0);
-		// 总权重非法时兜底返回错误，避免随机逻辑异常
+		// 有限正数求和可能溢出为 Infinity，兜底避免随机逻辑异常
 		if (!Number.isFinite(totalWeight) || totalWeight <= 0) {
 			return jsonErrorResponse(CONFIG.ERRORS.NO_AVAILABLE_IMAGES, {
 				hint: "No valid weighted candidates available",
@@ -416,7 +438,8 @@ const buildRandomImgCountData = (folderMap) => {
 			let groupTotal = 0;
 			// 按字母序遍历主题层，累加各组合的图片数量
 			for (const theme of Object.keys(brightnessEntry).sort()) {
-				const count = Number(brightnessEntry[theme] ?? 0);
+				const rawCount = Number(brightnessEntry[theme] ?? 0);
+				const count = Number.isFinite(rawCount) ? rawCount : 0;
 				groupTotal += count;
 				totalImages += count;
 				// 首次遇到该主题时初始化其统计对象

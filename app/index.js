@@ -24,9 +24,16 @@ const ROUTES = {
 // 路由处理器自动解析逻辑
 // ===========================
 
+// 普通路由 handler 缓存，避免重复按命名约定解析模块导出。
 const routeHandlerCache = new Map();
+// 隐藏路由 handler 映射的初始化 Promise，全局只构建一次。
 let hiddenHandlerMapPromise = null;
-let hiddenHandlerValidationLogged = false;
+
+// 归一化路由路径：去掉尾部斜杠，根路径保持为 /。
+const normalizePathname = (pathname) => {
+	const normalizedPath = pathname.startsWith("/") ? pathname : `/${pathname}`;
+	return normalizedPath.replace(/\/+$/, "") || "/";
+};
 
 // 将横线或下划线分隔的字符串转换为 PascalCase（如 random-img → RandomImg）。
 const toPascalCase = (value) =>
@@ -103,8 +110,7 @@ const resolveHiddenHandler = async (kvPathKey) => {
 				}
 			}
 
-			if (unresolvedPathKeys.length > 0 && !hiddenHandlerValidationLogged) {
-				hiddenHandlerValidationLogged = true;
+			if (unresolvedPathKeys.length > 0) {
 				console.warn(
 					"Hidden route handler mapping missing for keys:",
 					unresolvedPathKeys.join(", ")
@@ -127,15 +133,20 @@ const resolveHiddenHandler = async (kvPathKey) => {
 const resolveHiddenPathRoute = async (url, request, env) => {
 	const { pathname, search } = url;
 
-	for (const pathKey of HIDDEN_PATH_KEYS) {
-		const dynamicPath = await getKvTextCached({
-			env,
-			namespace: HIDDEN_ROUTES_NAMESPACE,
-			key: pathKey,
-			cacheKey: `hidden-routes::${pathKey}`,
-		});
+	const hiddenPathEntries = await Promise.all(
+		HIDDEN_PATH_KEYS.map(async (pathKey) => ({
+			pathKey,
+			dynamicPath: await getKvTextCached({
+				env,
+				namespace: HIDDEN_ROUTES_NAMESPACE,
+				key: pathKey,
+				cacheKey: `hidden-routes::${pathKey}`,
+			}),
+		}))
+	);
 
-		if (dynamicPath && pathname === dynamicPath) {
+	for (const { pathKey, dynamicPath } of hiddenPathEntries) {
+		if (dynamicPath && pathname === normalizePathname(dynamicPath)) {
 			if (search) {
 				return jsonErrorResponse({ status: 403, message: "Forbidden: Routes do not accept query parameters" });
 			}
@@ -161,16 +172,19 @@ export default {
 	async fetch(request, env) {
 		try {
 			const url = new URL(request.url);
-			const { pathname } = url;
+			const pathname = normalizePathname(url.pathname);
+			url.pathname = pathname;
 			const handler = await resolveRouteHandler(pathname);
 
 			if (handler) {
 				return await handler(request, env);
 			}
 
-			const hiddenPathResponse = await resolveHiddenPathRoute(url, request, env);
-			if (hiddenPathResponse) {
-				return hiddenPathResponse;
+			if (HIDDEN_PATH_KEYS.length > 0) {
+				const hiddenPathResponse = await resolveHiddenPathRoute(url, request, env);
+				if (hiddenPathResponse) {
+					return hiddenPathResponse;
+				}
 			}
 
 			return jsonErrorResponse({ status: 404, message: "API Not Found" });

@@ -34,6 +34,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+try:
+    import pytest
+except ModuleNotFoundError:
+    pytest = None
+
 
 # ===========================
 # 工具函数：环境变量与配置解析
@@ -83,6 +88,13 @@ RETRYABLE_STATUS_MAX = 599
 # 从统计结果筛选测试组合时允许的设备与亮度维度。
 SUPPORTED_DEVICES = {"pc", "mb"}
 SUPPORTED_BRIGHTNESS = {"dark", "light"}
+
+# 单值 query 参数重复用例。
+DUPLICATE_SINGLE_VALUE_QUERY_CASES = (
+    ("d", (("d", "pc"), ("d", "mb")), "duplicate device param"),
+    ("b", (("b", "dark"), ("b", "light")), "duplicate brightness param"),
+    ("m", (("m", "proxy"), ("m", "redirect")), "duplicate method param"),
+)
 
 # 一次完整测试中必须覆盖到的错误类型。
 REQUIRED_ERROR_COVERAGE_KEYS = {
@@ -545,6 +557,37 @@ class ApiTester:
                 str(details),
             )
 
+    def expect_duplicate_query_error(
+        self, field: str, query_items: list[tuple[str, str]], label: str
+    ) -> None:
+        # 重复单值 query 参数统一断言。
+        result = self.request_query_items(
+            "/random-img",
+            query_items=query_items,
+            follow_redirects=True,
+        )
+        self.assert_true(
+            result.status == 400,
+            f"{label} status",
+            f"status={result.status}, expected=400",
+        )
+        payload = self._assert_error_json_payload(result, 400, label)
+        if not isinstance(payload, dict):
+            return
+
+        message = str(payload.get("message", ""))
+        self.assert_true(
+            "Duplicate query parameter" in message,
+            f"{label} message",
+            f"message={message}",
+        )
+        details = payload.get("details", {})
+        self.assert_true(
+            isinstance(details, dict) and details.get("field") == field,
+            f"{label} field={field}",
+            str(details),
+        )
+
     def expect_empty_status(
         self,
         path: str,
@@ -769,86 +812,8 @@ class ApiTester:
         )
 
         # 3.5) 单值参数重复（d/b/m 各只能出现一次）→ 400 DUPLICATE_QUERY
-        dup_device_result = self.request_query_items(
-            "/random-img",
-            query_items=[("d", "pc"), ("d", "mb")],
-            follow_redirects=True,
-        )
-        self.assert_true(
-            dup_device_result.status == 400,
-            "duplicate device param status",
-            f"status={dup_device_result.status}, expected=400",
-        )
-        dup_device_payload = self._assert_error_json_payload(
-            dup_device_result, 400, "duplicate device param"
-        )
-        if isinstance(dup_device_payload, dict):
-            dup_device_message = str(dup_device_payload.get("message", ""))
-            self.assert_true(
-                "Duplicate query parameter" in dup_device_message,
-                "duplicate device param message",
-                f"message={dup_device_message}",
-            )
-            dup_device_details = dup_device_payload.get("details", {})
-            self.assert_true(
-                isinstance(dup_device_details, dict) and dup_device_details.get("field") == "d",
-                "duplicate device param field=d",
-                str(dup_device_details),
-            )
-
-        dup_brightness_result = self.request_query_items(
-            "/random-img",
-            query_items=[("b", "dark"), ("b", "light")],
-            follow_redirects=True,
-        )
-        self.assert_true(
-            dup_brightness_result.status == 400,
-            "duplicate brightness param status",
-            f"status={dup_brightness_result.status}, expected=400",
-        )
-        dup_brightness_payload = self._assert_error_json_payload(
-            dup_brightness_result, 400, "duplicate brightness param"
-        )
-        if isinstance(dup_brightness_payload, dict):
-            dup_brightness_message = str(dup_brightness_payload.get("message", ""))
-            self.assert_true(
-                "Duplicate query parameter" in dup_brightness_message,
-                "duplicate brightness param message",
-                f"message={dup_brightness_message}",
-            )
-            dup_brightness_details = dup_brightness_payload.get("details", {})
-            self.assert_true(
-                isinstance(dup_brightness_details, dict) and dup_brightness_details.get("field") == "b",
-                "duplicate brightness param field=b",
-                str(dup_brightness_details),
-            )
-
-        dup_method_result = self.request_query_items(
-            "/random-img",
-            query_items=[("m", "proxy"), ("m", "redirect")],
-            follow_redirects=True,
-        )
-        self.assert_true(
-            dup_method_result.status == 400,
-            "duplicate method param status",
-            f"status={dup_method_result.status}, expected=400",
-        )
-        dup_method_payload = self._assert_error_json_payload(
-            dup_method_result, 400, "duplicate method param"
-        )
-        if isinstance(dup_method_payload, dict):
-            dup_method_message = str(dup_method_payload.get("message", ""))
-            self.assert_true(
-                "Duplicate query parameter" in dup_method_message,
-                "duplicate method param message",
-                f"message={dup_method_message}",
-            )
-            dup_method_details = dup_method_payload.get("details", {})
-            self.assert_true(
-                isinstance(dup_method_details, dict) and dup_method_details.get("field") == "m",
-                "duplicate method param field=m",
-                str(dup_method_details),
-            )
+        for field, query_items, label in DUPLICATE_SINGLE_VALUE_QUERY_CASES:
+            self.expect_duplicate_query_error(field, list(query_items), label)
 
         # 重复 t 参数应仍然允许（t 是多值参数）。
         any_valid_theme = next(
@@ -951,6 +916,25 @@ class ApiTester:
                 mixed_case_device_brightness_redirect.status == 200,
                 "mixed-case device/brightness redirect fallback-to-proxy status",
                 f"status={mixed_case_device_brightness_redirect.status}",
+            )
+
+        # 带尾部斜杠的路径应与 /random-img 等价。
+        trailing_slash_redirect = self.request(
+            "/random-img/",
+            query={"m": "redirect"},
+            follow_redirects=False,
+        )
+        if REDIRECT_ENABLED:
+            self.assert_true(
+                trailing_slash_redirect.status == 302,
+                "GET /random-img/ trailing slash redirect status",
+                f"status={trailing_slash_redirect.status}",
+            )
+        else:
+            self.assert_true(
+                trailing_slash_redirect.status == 200,
+                "GET /random-img/ trailing slash redirect fallback-to-proxy status",
+                f"status={trailing_slash_redirect.status}",
             )
 
         # 5) 默认请求：不传 m 参数时应按 DEFAULT_METHOD 行为响应。
@@ -1600,6 +1584,21 @@ def main() -> None:
     )
     code = tester.run()
     raise SystemExit(code)
+
+
+if pytest is not None:
+    @pytest.mark.parametrize("field,query_items,label", DUPLICATE_SINGLE_VALUE_QUERY_CASES)
+    def test_duplicate_single_value_query(
+        field: str, query_items: tuple[tuple[str, str], ...], label: str
+    ) -> None:
+        tester = ApiTester(
+            api_base_url=API_BASE_URL,
+            asset_base_url=ASSET_BASE_URL,
+            timeout=TIMEOUT_SECONDS,
+            random_runs=RANDOM_RUNS,
+        )
+        tester.expect_duplicate_query_error(field, list(query_items), label)
+        assert tester.failed == 0, "\n".join(tester.failures)
 
 
 if __name__ == "__main__":

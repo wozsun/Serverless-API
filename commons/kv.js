@@ -18,7 +18,6 @@ const KV_RETRY_BASE_DELAY_MS = 50;
 // ===========================
 
 const cacheStores = {
-	raw: new Map(),
 	boolean: new Map(),
 	jsonObject: new Map(),
 	number: new Map(),
@@ -83,29 +82,22 @@ const toTrimmedNonEmptyLines = (raw) => {
 	return lines.length > 0 ? lines : null;
 };
 
-// 将原始文本归一化为标准载荷（text + lines）
-const normalizeRawText = (raw) => {
-	const lines = toTrimmedNonEmptyLines(raw);
-	if (!lines) {
-		return null;
-	}
-	return {
-		text: lines.join("\n"),
-		lines,
-	};
-};
-
 // 严格提取单行：仅当行数等于 1 时返回该行，否则返回 null
-const toSingleLine = (payload) => {
-	if (!payload || !Array.isArray(payload.lines) || payload.lines.length !== 1) {
+const toSingleLine = (lines) => {
+	if (!Array.isArray(lines) || lines.length !== 1) {
 		return null;
 	}
-	return payload.lines[0];
+	return lines[0];
 };
 
 // 从当前运行平台的 KV 按指定 type 拉取数据，失败时按上限重试；key 不存在或异常均返回 null。
 const fetchFromKv = async ({ env, namespace, key, type }) => {
-	const kvClient = getKvClient({ env, namespace });
+	let kvClient;
+	try {
+		kvClient = getKvClient({ env, namespace });
+	} catch {
+		return null;
+	}
 	if (!kvClient || typeof kvClient.get !== "function") {
 		return null;
 	}
@@ -123,23 +115,6 @@ const fetchFromKv = async ({ env, namespace, key, type }) => {
 	}
 
 	return null;
-};
-
-// 带缓存获取归一化后的源数据载荷
-const getNormalizedSourceCached = async ({
-	env,
-	namespace,
-	key,
-	cacheKey = "",
-	ttlMs = KV_CACHE_TTL_MS,
-}) => {
-	const id = buildCacheKey(env, namespace, key, cacheKey);
-	return readCachedValue({
-		cacheStore: cacheStores.raw,
-		id,
-		ttlMs,
-		loader: async () => normalizeRawText(await fetchFromKv({ env, namespace, key, type: "text" })),
-	});
 };
 
 // ===========================
@@ -194,21 +169,21 @@ const parseUrl = (line) => {
 // Getter 工厂
 // ===========================
 
-// 根据 sourceType 从归一化载荷中提取对应片段
-const pickSource = (payload, sourceType) => {
-	if (!payload) {
+// 根据 sourceType 从文本行中提取对应片段
+const pickSource = (lines, sourceType) => {
+	if (!lines) {
 		return null;
 	}
 	if (sourceType === "line") {
-		return toSingleLine(payload);
+		return toSingleLine(lines);
 	}
 	if (sourceType === "lines") {
-		return payload.lines;
+		return lines;
 	}
 	return null;
 };
 
-// 构建类型化 KV Getter：组合 source 提取、严格解析和独立缓存
+// 构建类型化 KV Getter：单层缓存解析结果，未命中时直接回源读取并解析。
 const createTypedKvGetter = ({ cacheStore, sourceType, parser }) => {
 	return async ({ env, namespace, key, cacheKey = "", ttlMs = KV_CACHE_TTL_MS }) => {
 		const id = buildCacheKey(env, namespace, key, cacheKey);
@@ -217,8 +192,9 @@ const createTypedKvGetter = ({ cacheStore, sourceType, parser }) => {
 			id,
 			ttlMs,
 			loader: async () => {
-				const payload = await getNormalizedSourceCached({ env, namespace, key, cacheKey, ttlMs });
-				const source = pickSource(payload, sourceType);
+				const raw = await fetchFromKv({ env, namespace, key, type: "text" });
+				const lines = toTrimmedNonEmptyLines(raw);
+				const source = pickSource(lines, sourceType);
 				return parser(source);
 			},
 		});

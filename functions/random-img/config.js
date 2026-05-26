@@ -10,17 +10,17 @@ export const FOLDER_MAP_KEY = "FOLDER_MAP";
 export const BASE_IMAGE_URL_KEY = "BASE_IMAGE_URL";
 
 // 允许的查询参数：d=设备, b=亮度, t=主题, m=响应方式
-export const ALLOWED_QUERY = ["d", "b", "t", "m"];
+export const ALLOWED_QUERY = Object.freeze(["d", "b", "t", "m"]);
 // 仅允许传入单个值的参数（主题 t 允许多值）
-export const SINGLE_VALUE_QUERY = ["d", "b", "m"];
+export const SINGLE_VALUE_QUERY = Object.freeze(["d", "b", "m"]);
 // folderMap 中的设备类型：pc=桌面端, mb=移动端
-export const MAP_DEVICES = ["pc", "mb"];
+export const MAP_DEVICES = Object.freeze(["pc", "mb"]);
 // 请求可接受的设备值：在 MAP_DEVICES 基础上增加 r = 强制随机
-export const REQUEST_DEVICES = [...MAP_DEVICES, "r"];
+export const REQUEST_DEVICES = Object.freeze([...MAP_DEVICES, "r"]);
 // 亮度类型：dark=暗色, light=亮色
-export const BRIGHTNESS_VALUES = ["dark", "light"];
+export const BRIGHTNESS_VALUES = Object.freeze(["dark", "light"]);
 // 可选响应方式：proxy=代理转发, redirect=302 重定向
-export const METHOD_VALUES = ["proxy", "redirect"];
+export const METHOD_VALUES = Object.freeze(["proxy", "redirect"]);
 
 // 默认响应方式
 export const DEFAULT_METHOD = "proxy";
@@ -31,8 +31,10 @@ export const REDIRECT_ENABLED = true;
 export const FETCH_MAX_ATTEMPTS = 3;
 // proxy 模式下重试间隔基数（毫秒），实际延迟 = 基数 × 当前重试次数
 export const FETCH_RETRY_DELAY_MS = 50;
+// proxy 模式下单次上游请求超时时间（毫秒）
+export const FETCH_TIMEOUT_MS = 15 * 1000;
 // proxy 模式下可重试的临时上游 HTTP 状态码
-export const RETRYABLE_UPSTREAM_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504]);
+export const RETRYABLE_UPSTREAM_STATUS_CODES = Object.freeze([408, 425, 429, 500, 502, 503, 504]);
 
 // proxy 模式下是否返回 X-Image-Info 响应头（包含图片分组信息）
 export const IMAGE_INFO_HEADER_ENABLED = true;

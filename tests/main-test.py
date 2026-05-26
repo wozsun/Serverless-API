@@ -178,8 +178,15 @@ def main() -> None:
     routes = [
         ExpectedRoute(path="/", expected_status=404, expected_payload_status=404, expected_message="No API route specified"),
         ExpectedRoute(path="/hello", expected_status=200, expected_payload_status=None, expected_message="Hello, World!"),
+        ExpectedRoute(path="/hello/", expected_status=200, expected_payload_status=None, expected_message="Hello, World!"),
         ExpectedRoute(
             path="/healthcheck",
+            expected_status=200,
+            expected_payload_status=None,
+            expected_message="API on EdgeFunction is healthy",
+        ),
+        ExpectedRoute(
+            path="/healthcheck/",
             expected_status=200,
             expected_payload_status=None,
             expected_message="API on EdgeFunction is healthy",
