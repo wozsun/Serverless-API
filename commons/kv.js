@@ -28,7 +28,7 @@ const cacheStores = {
 
 // 生成缓存键：按 provider 隔离缓存，再优先使用自定义 cacheKey。
 const buildCacheKey = (env, namespace, key, cacheKey) => {
-	const provider = String(env?.KV_PROVIDER || "ESA").toUpperCase();
+	const provider = String(env?.KV_PROVIDER || "ESA").trim().toUpperCase();
 	return `${provider}::${cacheKey || `${namespace}::${key}`}`;
 };
 
