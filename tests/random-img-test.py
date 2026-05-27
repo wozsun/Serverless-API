@@ -181,7 +181,7 @@ RANDOM_IMG_COUNT_PATH = "/" + _required_config_str(
 ).strip("/")
 IMAGE_PATH_PATTERN = str(IMAGE_PATH_PATTERN).strip().lstrip("/")
 
-HIDDEN_ROUTE_QUERY_FORBIDDEN_MESSAGE_PART = "Routes do not accept query parameters"
+HIDDEN_ROUTE_QUERY_FORBIDDEN_MESSAGE_PART = "Query parameters are not allowed"
 
 SENSITIVE_LOG_TOKENS = sorted(
     {
@@ -712,7 +712,28 @@ class ApiTester:
                     str(sample_total),
                 )
 
-        # 隐藏路由附带查询参数时应返回 403。
+        # 空 query 标记按无参数处理，不应触发隐藏路由 query 限制。
+        empty_query_count = self.request(f"{RANDOM_IMG_COUNT_PATH}?")
+        self.assert_true(
+            empty_query_count.status == 200,
+            "count route empty query marker is allowed",
+            f"status={empty_query_count.status}",
+        )
+
+        # 隐藏路由路径同样按入口规则标准化，兼容多余前导/尾部斜杠。
+        for normalized_hidden_path in [
+            f"//{RANDOM_IMG_COUNT_PATH.lstrip('/')}",
+            f"{RANDOM_IMG_COUNT_PATH}/",
+            f"{RANDOM_IMG_COUNT_PATH}//",
+        ]:
+            normalized_hidden_result = self.request(normalized_hidden_path)
+            self.assert_true(
+                normalized_hidden_result.status == 200,
+                "count route normalized path is allowed",
+                f"path={normalized_hidden_path}, status={normalized_hidden_result.status}",
+            )
+
+        # 隐藏路由附带实际查询参数时应返回 403。
         self.expect_json_error(
             RANDOM_IMG_COUNT_PATH,
             {"x": "1"},

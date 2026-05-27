@@ -57,30 +57,30 @@ export const IMAGE_PATH_PLACEHOLDER_PATTERN = /\{(device|brightness|theme|index)
 
 // 随机图片 API 错误定义
 export const ERRORS = {
-	// 非法查询参数键
-	INVALID_QUERY: { status: 400, message: "Bad Request: Invalid query parameters" },
-	// 单值参数重复
-	DUPLICATE_QUERY: { status: 400, message: "Bad Request: Duplicate query parameter" },
-	// 非法设备值
-	INVALID_DEVICE: { status: 400, message: "Bad Request: Invalid device" },
-	// 非法亮度值
-	INVALID_BRIGHTNESS: { status: 400, message: "Bad Request: Invalid brightness" },
-	// 非法主题值
-	INVALID_THEME: { status: 400, message: "Bad Request: Invalid theme" },
-	// 包含与排除主题混用
-	THEME_CONFLICT: { status: 400, message: "Bad Request: Cannot mix include and exclude theme selectors" },
-	// 非法图片响应方式参数
-	INVALID_METHOD: { status: 400, message: "Bad Request: Invalid method" },
-	// KV 中 BASE_IMAGE_URL 缺失或无效
-	BASE_IMAGE_URL_CONFIG_ERROR: { status: 500, message: "Internal Server Error: BASE_IMAGE_URL is invalid or missing in KV" },
-	// KV 中 FOLDER_MAP 缺失或无效
-	FOLDER_MAP_CONFIG_ERROR: { status: 500, message: "Internal Server Error: FOLDER_MAP is invalid or missing in KV" },
-	// 筛选条件下无匹配图片
-	NO_IMAGES_FOR_COMBINATION: { status: 404, message: "Not Found: No available images for the selected filters" },
-	// 完全无可用图片
-	NO_AVAILABLE_IMAGES: { status: 404, message: "Not Found: No available images" },
-	// 上游返回非成功状态码
-	UPSTREAM_BAD_STATUS: { status: 502, message: "Bad Gateway: Upstream image service responded with a non-success status" },
-	// 上游请求网络/运行时异常
-	UPSTREAM_FETCH_EXCEPTION: { status: 502, message: "Bad Gateway: Failed to reach upstream image service due to network/runtime exception" },
+    // 非法查询参数键
+    INVALID_QUERY: { status: 400, message: "Bad Request: Invalid query parameters" },
+    // 单值参数重复
+    DUPLICATE_QUERY: { status: 400, message: "Bad Request: Duplicate query parameter" },
+    // 非法设备值
+    INVALID_DEVICE: { status: 400, message: "Bad Request: Invalid device" },
+    // 非法亮度值
+    INVALID_BRIGHTNESS: { status: 400, message: "Bad Request: Invalid brightness" },
+    // 非法主题值
+    INVALID_THEME: { status: 400, message: "Bad Request: Invalid theme" },
+    // 包含与排除主题混用
+    THEME_CONFLICT: { status: 400, message: "Bad Request: Cannot mix include and exclude theme selectors" },
+    // 非法图片响应方式参数
+    INVALID_METHOD: { status: 400, message: "Bad Request: Invalid method" },
+    // KV 中 BASE_IMAGE_URL 缺失或无效
+    BASE_IMAGE_URL_CONFIG_ERROR: { status: 500, message: "Internal Server Error: BASE_IMAGE_URL is invalid or missing in KV" },
+    // KV 中 FOLDER_MAP 缺失或无效
+    FOLDER_MAP_CONFIG_ERROR: { status: 500, message: "Internal Server Error: FOLDER_MAP is invalid or missing in KV" },
+    // 筛选条件下无匹配图片
+    NO_IMAGES_FOR_COMBINATION: { status: 404, message: "Not Found: No available images for the selected filters" },
+    // 完全无可用图片
+    NO_AVAILABLE_IMAGES: { status: 404, message: "Not Found: No available images" },
+    // 上游返回非成功状态码
+    UPSTREAM_BAD_STATUS: { status: 502, message: "Bad Gateway: Upstream image service responded with a non-success status" },
+    // 上游请求网络/运行时异常
+    UPSTREAM_FETCH_EXCEPTION: { status: 502, message: "Bad Gateway: Failed to reach upstream image service due to network/runtime exception" },
 };

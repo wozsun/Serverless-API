@@ -6,6 +6,7 @@
     1) / — 根路径应返回 404 及对应错误消息
     2) /hello — 应返回 200 及 Hello 消息
     3) /healthcheck — 应返回 200 及健康确认消息
+    4) 普通非业务路由携带实际 query 参数时应返回 403
 """
 from __future__ import annotations
 
@@ -33,6 +34,8 @@ TIMEOUT_SECONDS = 30
 MAX_NETWORK_RETRIES = 5
 # 线性退避基数（sleep = base * attempt）。
 RETRY_BACKOFF_BASE_SECONDS = 1
+# 普通路由默认禁止实际 query 参数时的错误消息。
+ROUTE_QUERY_FORBIDDEN_MESSAGE = "Forbidden: Query parameters are not allowed"
 
 
 # ===========================
@@ -179,6 +182,14 @@ def main() -> None:
         ExpectedRoute(path="/", expected_status=404, expected_payload_status=404, expected_message="No API route specified"),
         ExpectedRoute(path="/hello", expected_status=200, expected_payload_status=None, expected_message="Hello, World!"),
         ExpectedRoute(path="/hello/", expected_status=200, expected_payload_status=None, expected_message="Hello, World!"),
+        ExpectedRoute(path="//hello", expected_status=200, expected_payload_status=None, expected_message="Hello, World!"),
+        ExpectedRoute(path="/hello?", expected_status=200, expected_payload_status=None, expected_message="Hello, World!"),
+        ExpectedRoute(
+            path="/hello?x=1",
+            expected_status=403,
+            expected_payload_status=403,
+            expected_message=ROUTE_QUERY_FORBIDDEN_MESSAGE,
+        ),
         ExpectedRoute(
             path="/healthcheck",
             expected_status=200,
@@ -190,6 +201,18 @@ def main() -> None:
             expected_status=200,
             expected_payload_status=None,
             expected_message="API on EdgeFunction is healthy",
+        ),
+        ExpectedRoute(
+            path="/healthcheck?",
+            expected_status=200,
+            expected_payload_status=None,
+            expected_message="API on EdgeFunction is healthy",
+        ),
+        ExpectedRoute(
+            path="/healthcheck?x=1",
+            expected_status=403,
+            expected_payload_status=403,
+            expected_message=ROUTE_QUERY_FORBIDDEN_MESSAGE,
         ),
     ]
 

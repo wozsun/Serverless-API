@@ -40,6 +40,10 @@ tests/               端到端测试脚本
 
 普通路由注册在 `app/index.js` 的 `ROUTES` 对象中。若值为函数则直接用作 handler；若值为模块对象，则按命名约定自动匹配：路径 `/random-img` 对应导出 `handleRandomImg`。
 
+普通与隐藏路由匹配前都会标准化路径：多个前导 `/` 会压成一个，尾部 `/` 会被忽略。
+
+普通路由默认不接受实际 query 参数，目前仅 `/random-img` 允许；允许列表由 `app/index.js` 顶部的 `QUERY_ALLOWED_ROUTES` 控制。空 query 标记（如 `?`）按无参数处理。
+
 ### 隐藏路由
 
 隐藏路由的路径不在代码中硬编码，而是从 KV 动态读取。当前注册了一个隐藏路由：
@@ -50,7 +54,7 @@ tests/               端到端测试脚本
 
 新增隐藏路由只需在 `HIDDEN_PATH_KEYS` 数组中追加 KV key，并在已注册的业务模块中导出对应的 `handleXxx` 函数。
 
-隐藏路由不接受查询参数，携带 query 会返回 403。
+隐藏路由不接受实际查询参数，携带 query 参数会返回 403。空 query 标记（如 `?`）按无参数处理。
 
 ## API 接口
 
@@ -129,13 +133,13 @@ const SINGLE_VALUE_QUERY = ["d", "b", "m"];
 | 状态码 | 场景 |
 | --- | --- |
 | 400 | 参数非法、重复、混用包含/排除主题等 |
-| 403 | Referer 校验未通过（仅在启用时），或隐藏路由携带查询参数 |
+| 403 | Referer 校验未通过（仅在启用时），或路由不接受实际 query 参数 |
 | 404 | 无匹配图片或无匹配路由 |
 | 405 | 使用了 GET 以外的方法 |
 | 500 | KV 配置缺失或无效 |
 | 502 | 上游图片服务请求失败 |
 
-具体错误定义见 `functions/random-img/config.js` 中的 `ERRORS` 常量。
+随机图片业务错误定义见 `functions/random-img/config.js` 中的 `ERRORS` 常量；路由层错误由 `app/index.js` 返回。
 
 ### `GET /random-img/count`（隐藏路由）
 
