@@ -10,6 +10,8 @@ const REQUEST_DEVICE_SET = new Set(CONFIG.REQUEST_DEVICES);
 const BRIGHTNESS_SET = new Set(CONFIG.BRIGHTNESS_VALUES);
 const METHOD_SET = new Set(CONFIG.METHOD_VALUES);
 const RETRYABLE_UPSTREAM_STATUS_CODE_SET = new Set(CONFIG.RETRYABLE_UPSTREAM_STATUS_CODES);
+// 匹配图片路径模板中可被替换的占位符
+const IMAGE_PATH_PLACEHOLDER_PATTERN = /\{(device|brightness|theme|index)\}/g;
 
 // 有效主题缓存：避免短时内多次请求重复从 FOLDER_MAP 提取主题列表
 let validThemeCache = {
@@ -117,7 +119,7 @@ const buildImageResult = (baseImageUrl, selectedFolder) => {
         index: paddedImageIndex,
     };
     const imagePath = CONFIG.IMAGE_PATH_PATTERN
-        .replace(CONFIG.IMAGE_PATH_PLACEHOLDER_PATTERN, (_, key) => imagePathValues[key])
+        .replace(IMAGE_PATH_PLACEHOLDER_PATTERN, (_, key) => imagePathValues[key])
         .replace(/^\/+/, "");
     const url = `${baseImageUrl}${imagePath}${CONFIG.IMAGE_FILE_EXTENSION}`;
     const imageInfo = `${selectedFolder.device}-${selectedFolder.brightness}-${selectedFolder.theme}-${imageIndex}`;

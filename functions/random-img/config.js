@@ -52,8 +52,6 @@ export const IMAGE_INDEX_DIGITS = 6;
 export const IMAGE_FILE_EXTENSION = ".webp";
 // 图片路径模板：拼接在 BASE_IMAGE_URL 后，不含文件扩展名
 export const IMAGE_PATH_PATTERN = "{device}-{brightness}/{theme}/{index}";
-// 匹配图片路径模板中可被替换的占位符
-export const IMAGE_PATH_PLACEHOLDER_PATTERN = /\{(device|brightness|theme|index)\}/g;
 
 // 随机图片 API 错误定义
 export const ERRORS = {
